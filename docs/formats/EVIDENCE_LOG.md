@@ -48,7 +48,7 @@ Record only what was observed. Keep raw hex excerpts to 64 bytes or fewer.
 
 ## Entries
 
-Common to E-0001..E-0015: date 2026-10-12; method static inspection (`ls`, `sha256sum`, `xxd`, `tools/link_check.py`); provenance is a third-party repackaged distribution, to be re-verified against retail Steam files.
+Common to E-0001..E-0019: date 2026-10-12; method static inspection (`ls`, `sha256sum`, `xxd`, `tools/link_check.py`, `tools/link_nested.py`); provenance is a third-party repackaged distribution, to be re-verified against retail Steam files.
 
 ### E-0001: res/res_grp.bin header
 
@@ -134,7 +134,7 @@ Common to E-0001..E-0015: date 2026-10-12; method static inspection (`ls`, `sha2
 ### E-0011: res_grp entry 0 descriptor records
 
 - Command: `xxd -s 248 -l 64 res/res_grp.bin` (file offset 248 = 184 + 0x40, the descriptor table start)
-- Observation: ten bytes-groups starting at 0xF8 decode as 12-byte records (x, y, w, h, last): (528, 452, 33, 33, 0), (92, 620, 10, 33, 0), (102, 620, 13, 33, 0), (115, 620, 10, 33, 0), (812, 604, 10, 33, 0), and the next record begins with x = 822. On the same row, x + w equals the next x.
+- Observation: the bytes from 0xF8 decode as 12-byte records (x, y, w, h, last): (528, 452, 33, 33, 0), (92, 620, 10, 33, 0), (102, 620, 13, 33, 0), (115, 620, 10, 33, 0), (812, 604, 10, 33, 0), and the next record begins with x = 822. On the same row, x + w equals the next x.
 - Hex excerpt (first 16 bytes): `1002c401 21002100 00000000 5c006c02`
 - Related: link.md section 7
 - Result: supports
@@ -167,3 +167,36 @@ Common to E-0001..E-0015: date 2026-10-12; method static inspection (`ls`, `sha2
 - Observation (from E-0014): entry 2 is (0x121C, 0x66C) and ends at 0x1888 = 6,280; entry 3 is an empty entry at offset 0x188C = 6,284 (the file size). The file therefore has the same 4-byte tail as the other five files, and entries 3 to 5 are empty.
 - Effect: the exception in link.md was removed; all six files satisfy `last non-empty end + 4 = file size`.
 - Result: contradicts the earlier interpretation
+
+### E-0016: link_nested output for three containers
+
+- Command: `python3 tools/link_nested.py "$G/res/<file>" 0` for `res_grp.bin`, `res_exp.bin`, `res_exp_pc.bin`
+- Observation (n, data entry, descriptor end, predicted data start, actual data start):
+  - res_grp: n = 372; data (0x11C0, 0x480070); descriptor end 0x11B0; predicted 0x11C0; actual 0x11C0; tag `GT1G0600`; last values {0: 370, 1: 1, 2: 1}; max x+w 1280; max y+h 775; common sizes (12,12) x54, (3,32) x27, (53,26) x26, (18,18) x21, (4,4) x18, (8,24) x15, (32,32) x12, (30,30) x11.
+  - res_exp: n = 111; data (0x580, 0x40038); descriptor end 0x574; predicted 0x580; actual 0x580; tag `GT1G0600`; last values {0: 111}; max x+w 240; max y+h 200; sizes (20,20) x111.
+  - res_exp_pc: n = 2; data (0x60, 0x2054); descriptor end 0x58; predicted 0x60; actual 0x60; tag `GT1G0600`; last values {0: 1, 1: 1}; max x+w 32; max y+h 32; sizes (32,32) x2.
+- Open point: the 1,280 maximum for `res_grp` entry 0 exceeds the 1,024-wide texture 0 found in E-0017.
+- Related: link.md section 7
+- Result: supports (one open inconsistency)
+
+### E-0017: GT1G header of res_grp entry 0
+
+- Command: `xxd -s 4728 -l 128 res/res_grp.bin` (4,728 = 184 + 0x11C0)
+- Observation: at 0x1278, ASCII `GT1G0600`, u32 0x480070 (equals the nested data size), u32 0x28, u32 3, then 0, 0, then 1, 1, 1; offset table at +0x28: 0x0C, 0x400020, 0x440034. The 20 bytes starting at file offset 0x12AC are `10 01 aa 00 11 11 01 10 0c 00 00 00 00 00 00 00 00 00 00 01`, and pixel data starts at 0x12C0, whose first bytes follow the pattern `xx xx xx ff`.
+- Hex excerpt (first 16 bytes): `47543147 30363030 70004800 28000000`
+- Related: gt1g.md
+- Result: supports
+
+### E-0018: gap sentinel after res_grp entry 0
+
+- Command: `xxd -s 4723432 -l 4 res/res_grp.bin` (4,723,432 = 184 + 0x481230)
+- Observation: bytes `ef cd ab 89`.
+- Related: link.md section 6
+- Result: supports the sentinel hypothesis (two gaps inspected, in two different files)
+
+### E-0019: GT1G size arithmetic
+
+- Method: arithmetic over E-0016 and E-0017.
+- Observation: texture 0 is at table offset 0x0C with a 20-byte header, so its pixels start at table offset 0x20 and span until texture 1 at 0x400020, which is exactly 0x400000 = 1024 * 1024 * 4 bytes; byte 0x02 of its entry header is 0xAA (both nibbles 10). Texture 1 to texture 2 spans 0x40014 (0x40000 pixel bytes after a 20-byte header). The remainder after texture 2's header equals 0x40000. The fixed total of 0x70 header bytes equals 28 + 4n + 4n + 20n for n = 3. The same formula gives 0x38 for n = 1 and 0x54 for n = 2, matching `res_exp` and `res_exp_pc`.
+- Related: gt1g.md section 7
+- Result: supports (textures 1 and 2 headers not read)

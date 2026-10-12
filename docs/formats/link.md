@@ -7,7 +7,7 @@ Tests: none
 
 ## 1. Overview
 
-All six files under `res/` start with the ASCII magic `LINK`: `res_grp.bin`, `res_else.bin`, `res_exp.bin`, `res_exp_pc.bin`, `res_shader.bin`, and `res_snd.bin`. Each holds a table of (offset, size) pairs followed by the payloads. Some payloads are themselves `LINK` containers.
+All six files under `res/` start with the ASCII magic `LINK`: `res_grp.bin`, `res_else.bin`, `res_exp.bin`, `res_exp_pc.bin`, `res_shader.bin`, and `res_snd.bin`. Each holds a table of (offset, size) pairs followed by the payloads. Some payloads are themselves `LINK` containers whose data section is a `GT1G` texture block (see [gt1g.md](gt1g.md)).
 
 The names are read as "graphics", "other", "expression", "shader", and "sound" resources, which is an inference from names only.
 
@@ -54,13 +54,13 @@ Example (`res_shader.bin`, E-0014): (0x40, 0xDAC), (0xDF0, 0x428), (0x121C, 0x66
 
 ## 6. Invariants
 
-Checked with `tools/link_check.py` over all six files (E-0008) and corrected in E-0015:
+Checked with `tools/link_check.py` over all six files (E-0008, corrected by E-0015):
 
 - [x] First entry offset equals `16 + 8 * count` in all six files.
 - [x] Between consecutive entries, `next.offset = prev.offset + prev.size + 4` holds for every gap in every file (histogram `{4: n}` in all six).
-- [x] In all six files, the last non-empty payload ends exactly 4 bytes before the end of the file. (`res_shader.bin`: entry 2 ends at 6,280 and the file size is 6,284.)
+- [x] In all six files, the last non-empty payload ends exactly 4 bytes before the end of the file.
 - [x] Empty entries (size 0) continue the offset progression, so trailing empty entries can have an offset at or beyond the end of the file. In `res_shader.bin`, entry 3 has offset 6,284 (equal to the file size) and entries 4 and 5 have offsets 6,288 and 6,292.
-- [x] The 4 bytes after the first payload of `res_exp_pc.bin` (file offsets 8,396 to 8,399) are `ef cd ab 89`, which reads as the little-endian value 0x89ABCDEF (E-0013). Only one gap has been inspected.
+- [x] The 4 bytes that follow a payload are `ef cd ab 89` (little-endian 0x89ABCDEF) in the two gaps inspected: after the only payload of `res_exp_pc.bin` (file offset 8,396) and after entry 0 of `res_grp.bin` (file offset 4,723,432) (E-0013, E-0018). The other gaps have not been read.
 
 ## 7. Nested LINK Containers
 
@@ -80,13 +80,13 @@ Bytes +0x14 to +0x1F are zero in all three. Offsets are relative to the nested s
 | ---: | --- | --- | --- | --- |
 | +0x04 | u32 | version | 1 | hypothesis |
 | +0x08 | u32 | data_table_offset | 0x20, location of the data entry | hypothesis |
-| +0x0C | u32 | record_count | number of descriptor records | observed (res_grp: records decode consistently, E-0011) |
+| +0x0C | u32 | record_count | number of descriptor records (372, 111, 2) | observed |
 | +0x10 | u32 | descriptor_offset | 0x40, location of the descriptor table | observed |
 | +0x20 | u32 x2 | data_offset, data_size | one data entry; offset + size equals the outer payload size | observed |
 
 ### Descriptor records (12 bytes each)
 
-Observed in `res_grp.bin` entry 0 (E-0011, E-0012). Decoded as `u16 x, u16 y, u16 w, u16 h, u32 last`:
+Decoded as `u16 x, u16 y, u16 w, u16 h, u32 last`. Observed in all 372 + 111 + 2 records through `tools/link_nested.py` (E-0016), with the first ten records of `res_grp` entry 0 dumped in E-0011 and E-0012:
 
 | Record | x | y | w | h | last |
 | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -101,43 +101,42 @@ Observed in `res_grp.bin` entry 0 (E-0011, E-0012). Decoded as `u16 x, u16 y, u1
 | 366 | 948 | 748 | 20 | 20 | 0 |
 | 367 | 968 | 748 | 20 | 20 | 0 |
 
-Evidence that the first four u16 values are a rectangle: records 1 to 3 satisfy `x + w = next x` on the same row (92 + 10 = 102, 102 + 13 = 115), and records 366 and 367 satisfy 948 + 20 = 968. Heights are equal along a row. Records are therefore sprite or glyph rectangles in a texture. The meaning of the last u32 is unknown: it is 0 for all ten records seen here, while in `res_exp_pc.bin` the two 32 by 32 records have last = 0 and last = 1, which suggests a texture index (hypothesis).
+Evidence that the first four u16 values are a rectangle: on the same row, `x + w` equals the next `x` (92 + 10 = 102, 102 + 13 = 115, 948 + 20 = 968).
 
-Data start rule (fits all three samples): `data_offset = ((descriptor_offset + 12 * n) rounded down to 16) + 16` with n = 372, 111, and 2 giving 0x11C0, 0x580, and 0x60.
+Statistics from `link_nested.py` (E-0016):
 
-### Data section size hypothesis
+| File | Records | `last` values | max x+w | max y+h | Sizes |
+| --- | ---: | --- | ---: | ---: | --- |
+| res_grp entry 0 | 372 | 0: 370, 1: 1, 2: 1 | 1280 | 775 | (12,12) x54, (3,32) x27, (53,26) x26, (18,18) x21 |
+| res_exp entry 0 | 111 | 0: 111 | 240 | 200 | (20,20) x111 |
+| res_exp_pc entry 0 | 2 | 0: 1, 1: 1 | 32 | 32 | (32,32) x2 |
 
-| File | data_size | minus header guess | Pixel bytes | Reading |
-| --- | ---: | ---: | ---: | --- |
-| res_exp_pc | 0x2054 | 0x54 | 8,192 | two 32 by 32 images at 4 bytes per pixel |
-| res_exp | 0x40038 | 0x38 | 262,144 | one 256 by 256 image at 4 bytes per pixel |
-| res_grp | 0x480070 | 0x70 | 4,718,592 | 1,024 by 1,152 at 4 bytes per pixel, or several textures |
+`last` is the index of the texture inside the `GT1G` block: `res_exp_pc` has 2 textures with values 0 and 1, and `res_grp` entry 0 has 3 textures with values 0, 1, and 2 (see gt1g.md). `res_exp` has 111 records at 20 by 20 inside 240 by 200, which fits a grid of 12 by 10 cells.
 
-The header sizes 0x54, 0x38, and 0x70 equal 28 times 3, 2, and 4. This could mean a `GT1G` header of 28 bytes per texture plus 28 bytes fixed, giving 2, 1, and 3 textures. Largest rectangle extents seen in `res_grp` entry 0 are x + w = 988 and y + h = 768, which are inside a 1,024-wide texture. All of this is a hypothesis; the data start has not been dumped yet.
+Unresolved: `res_grp` entry 0 reaches x + w = 1280, but texture 0 is 1,024 wide (gt1g.md). The record that causes this has not been identified. Run `tools/link_nested.py` to list records beyond 1,024.
+
+Data start rule: `data_offset = ((descriptor_offset + 12 * n) rounded down to 16) + 16`. It fits the three samples and predicted 0x11C0 for `res_grp`, which was then observed as the actual `GT1G` start (E-0017).
 
 ## 8. Other Payload Observations
 
 | Payload | Observation | Confidence |
 | --- | --- | --- |
 | res_else entry 1 at 0x2C | starts with ASCII `LS11`; meaning unknown | observed |
-| res_exp_pc nested data start | nested offset 0x60 lands at absolute 0x78, where ASCII `GT1G0600` appears | observed |
 | res_shader entry 0 at 0x40 | begins with bytes `00 02 ff ff`, then `fe ff fb 01`, then ASCII `DBUG`; a path string beginning `C:\Project\` appears 0x30 bytes later | observed |
 
 The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0xFFFF0200 (pixel shader 2.0), a comment token, and a `DBUG` debug-info comment that embeds a source path. This matches the DirectX 9.0c requirement of the game. Treat as a hypothesis until confirmed against the public Direct3D 9 shader bytecode documentation. Shader bytes must not be committed.
 
 ## 9. Hypotheses
 
-- `GT1G0600` is the magic of a texture container used by KOEI TECMO titles (commonly called G1T). Test: compare the structure after the magic with public community documentation, without copying code.
 - `LS11` is a sub-container or compressed-stream tag. Test: capture a longer excerpt and look for repeating structure.
 - The 4-byte gap after each payload is the constant 0x89ABCDEF used as a terminator or integrity marker. Test: read the gap after every entry in every file.
-- The three entries of `res_shader.bin` hold compiled Direct3D 9 shaders. Test: parse the leading tokens of each payload.
+- The three non-empty entries of `res_shader.bin` hold compiled Direct3D 9 shaders. Test: parse the leading tokens of each payload.
 
 ## 10. Open Questions
 
-- Is the 4-byte gap always 0x89ABCDEF?
-- What is the last u32 of a descriptor record (texture index, flags, or padding)?
+- Does every gap equal 0x89ABCDEF?
+- Which `res_grp` entry-0 record reaches x + w = 1,280?
 - What are the 16 bytes between descriptor end and data start?
-- What is the exact structure of the data section header (28 bytes per texture)?
 - Do the other 20 `res_grp.bin` entries use the same nested layout?
 
 ## 11. Changelog
@@ -147,3 +146,4 @@ The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0
 | 2026-10-12 | Initial draft from header excerpts | E-0001..E-0004 |
 | 2026-10-12 | Full validation of six files, nested layout hypothesis | E-0007..E-0010 |
 | 2026-10-12 | Decoded descriptor records, gap sentinel, shader payload; corrected res_shader tail analysis | E-0011..E-0015 |
+| 2026-10-12 | Statistics for three nested containers, texture index evidence, second sentinel, GT1G split into gt1g.md | E-0016..E-0019 |

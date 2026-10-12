@@ -15,13 +15,14 @@ This directory documents the file formats of the game data that this project rea
 6. **Clean-room discipline.** Community documentation may be used to cross-check field meaning. Do not copy code from repositories without an explicit license.
 7. **Test coupling.** Each `confirmed` structure should have a parser unit test that uses a synthetic fixture matching the documented layout.
 8. **Provenance.** Record where each sample came from. Promote a field to `confirmed` only from retail files that were legitimately purchased.
+9. **Corrections.** When an earlier conclusion turns out to be wrong, add a correction entry to the evidence log and fix the format document in the same commit.
 
 ## Index
 
 | Format | Document | Status |
 | --- | --- | --- |
 | LINK container (res/*.bin) | [link.md](link.md) | draft |
-| GRP image | `grp.md` | not started |
+| GT1G texture container | [gt1g.md](gt1g.md) | draft |
 | DAT data (BDAT, scenario, MSG) | `dat.md` | not started |
 | Save file | `save.md` | not started |
 
@@ -30,6 +31,7 @@ Create a new document by copying [TEMPLATE.md](TEMPLATE.md).
 ## Tools
 
 - `tools/link_check.py`: validates the top-level table of LINK containers.
+- `tools/link_nested.py`: decodes a nested LINK entry, its descriptor records, and the GT1G header.
 
 ## Workflow
 
