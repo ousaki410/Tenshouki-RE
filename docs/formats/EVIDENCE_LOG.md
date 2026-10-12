@@ -48,7 +48,7 @@ Record only what was observed. Keep raw hex excerpts to 64 bytes or fewer.
 
 ## Entries
 
-Common to E-0001..E-0006: date 2026-10-12; method static inspection (`ls`, `sha256sum`, `xxd -l 128`); provenance is a third-party repackaged distribution, to be re-verified against retail Steam files.
+Common to E-0001..E-0010: date 2026-10-12; method static inspection (`ls`, `sha256sum`, `xxd`, `tools/link_check.py`); provenance is a third-party repackaged distribution, to be re-verified against retail Steam files.
 
 ### E-0001: res/res_grp.bin header
 
@@ -92,6 +92,40 @@ Common to E-0001..E-0006: date 2026-10-12; method static inspection (`ls`, `sha2
 
 ### E-0006: files outside the format scope
 
-- Observation: the directory contains third-party additions: `ali213.bin` (13,674 bytes, no recognizable header), `ALI213.ini`, `开始游戏.exe`, a 785,408-byte `steam_api.dll`, `language.dll`, and several `.url` shortcut files.
+- Observation: the directory contains third-party additions: `ali213.bin` (13,674 bytes, no recognizable header), `ALI213.ini`, a launcher executable added by the distributor, a 785,408-byte `steam_api.dll`, `language.dll`, and several `.url` shortcut files.
 - Decision: these files are not documented, not analyzed, and excluded from the project. Evidence for `confirmed` status must come from retail files.
 - Result: inconclusive
+
+### E-0007: res_shader.bin and res_snd.bin sizes
+
+- Command: `python3 tools/link_check.py "$G"/res/*.bin`
+- Observation: `res_shader.bin` is 6,284 bytes with count 6; `res_snd.bin` is 3,914,544 bytes with count 2. Both start with `LINK`, word 1, word 0. SHA-256 values were not captured.
+- Related: link.md
+- Result: supports
+
+### E-0008: link_check results for all six files
+
+- Observation (count, gap histogram, last end, file size):
+  - res_else: 3, {4: 2}, 164536, 164540
+  - res_exp: 1, {}, 263632, 263636
+  - res_exp_pc: 1, {}, 8396, 8400
+  - res_grp: 21, {4: 20}, 365574992, 365574996
+  - res_shader: 6, {4: 5}, 6292 (counting two empty entries), 6284
+  - res_snd: 2, {4: 1}, 3914540, 3914544
+- Detail for res_shader: the original script flagged entries 4 and 5 (offset 6288 and 6292, size 0) as out of bounds. Version 1 of the script treated empty entries as out of bounds; the script now allows empty entries beyond EOF.
+- Related: link.md sections 4 to 6
+- Result: supports (with the res_shader exception)
+
+### E-0009: nested LINK header of res_grp entry 0
+
+- Source: `xxd -s 184 -l 64 res/res_grp.bin`
+- Observation: nested words at +0x04 to +0x10 are 1, 0x20, 0x174, 0x40; bytes +0x14 to +0x1F are zero; the entry at +0x20 is (0x11C0, 0x480070), and 0x11C0 + 0x480070 = 0x481230, which equals the outer entry 0 size.
+- Hex excerpt (first 16 bytes): `4c494e4b 01000000 20000000 74010000`
+- Related: link.md section 7
+- Result: supports
+
+### E-0010: nested layout arithmetic check
+
+- Method: arithmetic over E-0003, E-0004, and E-0009.
+- Observation: for the three nested containers, data start equals `(0x40 + 12 * n) rounded down to 16, plus 16` with n = 372, 111, and 2 giving 0x11C0, 0x580, and 0x60.
+- Result: supports a hypothesis only; no descriptor record has been decoded yet.
