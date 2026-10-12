@@ -1,10 +1,12 @@
 /**
  * renderer.hpp - 渲染器抽象层
- * 支持 OpenGL 4.5 和 Vulkan 双后端
+ * 当前仅实现 OpenGL 后端 (Vulkan 为占位)
  */
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -45,7 +47,7 @@ public:
         Vulkan,
         Auto
     };
-    
+
     struct InitParams {
         Backend backend = Backend::Auto;
         void* window_handle = nullptr;  // SDL_Window*
@@ -56,20 +58,20 @@ public:
         bool debug_overlay = false;
         bool srgb_framebuffer = true;
     };
-    
+
     struct Viewport {
         int x = 0, y = 0;
         int width = 0, height = 0;
         float min_depth = 0.0f, max_depth = 1.0f;
     };
-    
+
     struct DrawCall {
         uint32_t vertex_count = 0;
         uint32_t instance_count = 1;
         uint32_t first_vertex = 0;
         uint32_t first_instance = 0;
     };
-    
+
     struct TextureCreateInfo {
         uint32_t width = 0;
         uint32_t height = 0;
@@ -97,7 +99,7 @@ public:
         const void* initial_data = nullptr;
         size_t data_size = 0;
     };
-    
+
     struct BufferCreateInfo {
         size_t size = 0;
         enum class Usage {
@@ -110,58 +112,35 @@ public:
         } usage = Usage::VertexBuffer;
         const void* initial_data = nullptr;
     };
-    
+
     struct PipelineCreateInfo {
         std::string vertex_shader;    // SPIR-V 路径或源码
         std::string fragment_shader;
         struct VertexLayout {
             struct Attribute {
                 std::string name;
-                enum class Format { Float, Float2, Float3, Float4, Int, Int2, Int3, Int4 } format;
+                enum class Format { Float, Float2, Float3, Float4, Int, Int2, Int3, Int4 } format = Format::Float;
                 uint32_t offset = 0;
             };
             std::vector<Attribute> attributes;
             uint32_t stride = 0;
         } vertex_layout;
-        
+
         enum class PrimitiveTopology { TriangleList, TriangleStrip, LineList, PointList } topology = PrimitiveTopology::TriangleList;
         enum class PolygonMode { Fill, Line, Point } polygon_mode = PolygonMode::Fill;
         enum class CullMode { None, Front, Back, FrontAndBack } cull_mode = CullMode::Back;
         bool depth_test = true;
         bool depth_write = true;
         enum class CompareOp { Never, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always } depth_compare = CompareOp::Less;
-        
+
         struct BlendState {
             bool enable = false;
             enum class Factor { Zero, One, SrcColor, OneMinusSrcColor, DstColor, OneMinusDstColor, SrcAlpha, OneMinusSrcAlpha, DstAlpha, OneMinusDstAlpha } src_color = Factor::SrcAlpha, dst_color = Factor::OneMinusSrcAlpha, src_alpha = Factor::One, dst_alpha = Factor::Zero;
             enum class Op { Add, Subtract, ReverseSubtract, Min, Max } op_color = Op::Add, op_alpha = Op::Add;
         } blend;
     };
-    
-    Renderer();
-    ~Renderer();
-    
-    // 初始化
-    bool init(const InitParams& params);
-    
-    // 关闭
-    void shutdown();
-    
-    // 调整大小
-    void on_resize(int width, int height);
-    
-    // 帧开始/结束
-    void begin_frame();
-    void end_frame();
-    
-    // 视口/裁剪
-    void set_viewport(const Viewport& vp);
-    void set_scissor(int x, int y, int width, int height);
-    
-    // 清屏
-    void clear(float r, float g, float b, float a, float depth = 1.0f, uint32_t stencil = 0);
-    
-    // 资源创建
+
+    // === 资源类型 (嵌套类) ===
     class Texture {
     public:
         Texture() = default;
@@ -169,20 +148,22 @@ public:
         Texture(const Texture&) = delete;
         Texture& operator=(const Texture&) = delete;
         Texture(Texture&& other) noexcept : id_(other.id_), target_(other.target_) { other.id_ = 0; }
-        Texture& operator=(Texture&& other) noexcept { 
-            if (this != &other) { 
+        Texture& operator=(Texture&& other) noexcept {
+            if (this != &other) {
                 if (id_) glDeleteTextures(1, &id_);
-                id_ = other.id_; target_ = other.target_; 
-                other.id_ = 0; 
-            } 
-            return *this; 
+                id_ = other.id_; target_ = other.target_;
+                other.id_ = 0;
+            }
+            return *this;
         }
-        
+
         bool create(const TextureCreateInfo& info) {
+            using Format = TextureCreateInfo::Format;
+
             target_ = (info.depth > 1) ? GL_TEXTURE_3D : (info.array_layers > 1) ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
             glGenTextures(1, &id_);
             glBindTexture(target_, id_);
-            
+
             GLenum internal_format = 0, format = 0, type = 0;
             switch (info.format) {
                 case Format::R8G8B8A8_UNORM: internal_format = GL_RGBA8; format = GL_RGBA; type = GL_UNSIGNED_BYTE; break;
@@ -195,23 +176,27 @@ public:
                 case Format::BC3_UNORM: internal_format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT; break;
                 case Format::BC7_UNORM: internal_format = GL_COMPRESSED_RGBA_BPTC_UNORM; break;
             }
-            
-            if (info.format == Format::BC1_RGBA_UNORM || info.format == Format::BC3_UNORM || info.format == Format::BC7_UNORM) {
+
+            const bool compressed = (info.format == Format::BC1_RGBA_UNORM ||
+                                     info.format == Format::BC3_UNORM ||
+                                     info.format == Format::BC7_UNORM);
+            if (compressed) {
                 if (info.initial_data && info.data_size > 0) {
-                    glCompressedTexImage2D(target_, 0, internal_format, info.width, info.height, 0, info.data_size, info.initial_data);
+                    glCompressedTexImage2D(target_, 0, internal_format,
+                                           static_cast<GLsizei>(info.width), static_cast<GLsizei>(info.height), 0,
+                                           static_cast<GLsizei>(info.data_size), info.initial_data);
                 }
             } else {
-                if (info.initial_data && info.data_size > 0) {
-                    glTexImage2D(target_, 0, internal_format, info.width, info.height, 0, format, type, info.initial_data);
-                } else {
-                    glTexImage2D(target_, 0, internal_format, info.width, info.height, 0, format, type, nullptr);
-                }
+                const void* pixels = (info.initial_data && info.data_size > 0) ? info.initial_data : nullptr;
+                glTexImage2D(target_, 0, static_cast<GLint>(internal_format),
+                             static_cast<GLsizei>(info.width), static_cast<GLsizei>(info.height), 0,
+                             format, type, pixels);
             }
-            
+
             if (info.mip_levels > 1) {
                 glGenerateMipmap(target_);
             }
-            
+
             glTexParameteri(target_, GL_TEXTURE_MIN_FILTER, info.mip_levels > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
             glTexParameteri(target_, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(target_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -219,19 +204,19 @@ public:
             if (target_ == GL_TEXTURE_3D || target_ == GL_TEXTURE_2D_ARRAY) {
                 glTexParameteri(target_, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
             }
-            
+
             glBindTexture(target_, 0);
             return id_ != 0;
         }
-        
+
         GLuint get_id() const { return id_; }
         GLenum get_target() const { return target_; }
-        
+
     private:
         GLuint id_ = 0;
         GLenum target_ = GL_TEXTURE_2D;
     };
-    
+
     class Buffer {
     public:
         Buffer() = default;
@@ -239,17 +224,16 @@ public:
         Buffer(const Buffer&) = delete;
         Buffer& operator=(const Buffer&) = delete;
         Buffer(Buffer&& other) noexcept : id_(other.id_), target_(other.target_), size_(other.size_) { other.id_ = 0; }
-        Buffer& operator=(Buffer&& other) noexcept { 
-            if (this != &other) { 
+        Buffer& operator=(Buffer&& other) noexcept {
+            if (this != &other) {
                 if (id_) glDeleteBuffers(1, &id_);
-                id_ = other.id_; target_ = other.target_; size_ = other.size_; 
-                other.id_ = 0; 
-            } 
-            return *this; 
+                id_ = other.id_; target_ = other.target_; size_ = other.size_;
+                other.id_ = 0;
+            }
+            return *this;
         }
-        
+
         bool create(const BufferCreateInfo& info) {
-            using BufferUsage = BufferCreateInfo::Usage;
             switch (info.usage) {
                 case BufferCreateInfo::Usage::VertexBuffer: target_ = GL_ARRAY_BUFFER; break;
                 case BufferCreateInfo::Usage::IndexBuffer: target_ = GL_ELEMENT_ARRAY_BUFFER; break;
@@ -260,40 +244,45 @@ public:
             }
             glGenBuffers(1, &id_);
             glBindBuffer(target_, id_);
-            glBufferData(target_, info.size, info.initial_data, GL_DYNAMIC_DRAW);
+            glBufferData(target_, static_cast<GLsizeiptr>(info.size), info.initial_data, GL_DYNAMIC_DRAW);
             size_ = info.size;
             glBindBuffer(target_, 0);
             return id_ != 0;
         }
-        
+
         void update(const void* data, size_t size, size_t offset = 0) {
             glBindBuffer(target_, id_);
-            glBufferSubData(target_, offset, size, data);
+            glBufferSubData(target_, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(size), data);
             glBindBuffer(target_, 0);
         }
-        
+
         GLuint get_id() const { return id_; }
         GLenum get_target() const { return target_; }
         size_t get_size() const { return size_; }
-        
+
     private:
         GLuint id_ = 0;
         GLenum target_ = GL_ARRAY_BUFFER;
         size_t size_ = 0;
     };
-    
+
     class Pipeline {
     public:
         Pipeline() = default;
         ~Pipeline() = default;
-        
+
         bool create(const PipelineCreateInfo& info) {
-            // For minimal implementation, we just store the info
-            // Actual shader compilation happens via Shader class
+            // 最小实现: 仅保存配置, 着色器编译由 Shader 完成
+            info_ = info;
             return true;
         }
+
+        const PipelineCreateInfo& get_info() const { return info_; }
+
+    private:
+        PipelineCreateInfo info_;
     };
-    
+
     class Shader {
     public:
         Shader() = default;
@@ -301,26 +290,26 @@ public:
         Shader(const Shader&) = delete;
         Shader& operator=(const Shader&) = delete;
         Shader(Shader&& other) noexcept : id_(other.id_) { other.id_ = 0; }
-        Shader& operator=(Shader&& other) noexcept { 
-            if (this != &other) { 
+        Shader& operator=(Shader&& other) noexcept {
+            if (this != &other) {
                 if (id_) glDeleteProgram(id_);
-                id_ = other.id_; 
-                other.id_ = 0; 
-            } 
-            return *this; 
+                id_ = other.id_;
+                other.id_ = 0;
+            }
+            return *this;
         }
-        
+
         bool create(GLuint program_id) {
             id_ = program_id;
             return id_ != 0;
         }
-        
+
         GLuint get_id() const { return id_; }
-        
+
     private:
         GLuint id_ = 0;
     };
-    
+
     // 2D 精灵渲染器
     class SpriteRenderer {
     public:
@@ -334,24 +323,27 @@ public:
             glm::vec4 uv_rect = {0, 0, 1, 1};  // UV 裁剪
             int layer = 0;  // 渲染层级
         };
-        
-        SpriteRenderer(Renderer& renderer);
+
+        explicit SpriteRenderer(Renderer& renderer);
         ~SpriteRenderer();
-        
+
+        SpriteRenderer(const SpriteRenderer&) = delete;
+        SpriteRenderer& operator=(const SpriteRenderer&) = delete;
+
         void begin(const glm::mat4& projection);
         void draw(const Sprite& sprite);
         void draw_batch(const std::vector<Sprite>& sprites);
         void end();
         void flush();
-        
+
         // 设置默认纹理 (白色像素)
         void set_default_texture(std::shared_ptr<Texture> tex);
-        
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl_;
     };
-    
+
     // 文本渲染器
     class TextRenderer {
     public:
@@ -365,76 +357,81 @@ public:
             float line_height = 1.2f;
             float letter_spacing = 0;
         };
-        
-        TextRenderer(Renderer& renderer);
+
+        explicit TextRenderer(Renderer& renderer);
         ~TextRenderer();
-        
+
+        TextRenderer(const TextRenderer&) = delete;
+        TextRenderer& operator=(const TextRenderer&) = delete;
+
         bool load_font(const std::filesystem::path& font_path, float size = 24.0f);
         void draw(const TextParams& params);
         glm::vec2 measure_text(const std::string& text, float size) const;
-        
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl_;
     };
-    
+
+    // === Renderer 自身接口 (仅声明一次) ===
     Renderer();
     ~Renderer();
-    
-    // 初始化
+
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
+
+    // 初始化 / 关闭
     bool init(const InitParams& params);
-    
-    // 关闭
     void shutdown();
-    
+
     // 调整大小
     void on_resize(int width, int height);
-    
+
     // 帧开始/结束
     void begin_frame();
     void end_frame();
-    
+
     // 视口/裁剪
     void set_viewport(const Viewport& vp);
     void set_scissor(int x, int y, int width, int height);
-    
+
     // 清屏
     void clear(float r, float g, float b, float a, float depth = 1.0f, uint32_t stencil = 0);
-    
+
     // 资源创建
     std::shared_ptr<Texture> create_texture(const TextureCreateInfo& info);
     std::shared_ptr<Buffer> create_buffer(const BufferCreateInfo& info);
     std::shared_ptr<Pipeline> create_pipeline(const PipelineCreateInfo& info);
     std::shared_ptr<Shader> create_shader(ShaderStage stage, const std::vector<uint32_t>& spirv);
-    
+
     // 绑定资源
     void bind_pipeline(std::shared_ptr<Pipeline> pipeline);
     void bind_vertex_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset = 0);
     void bind_index_buffer(std::shared_ptr<Buffer> buffer, uint32_t offset = 0);
     void bind_texture(uint32_t slot, std::shared_ptr<Texture> texture);
     void bind_uniform_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset = 0, uint32_t size = 0);
-    
+
     // 绘制
     void draw(const DrawCall& call);
     void draw_indexed(uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, int32_t vertex_offset = 0, uint32_t first_instance = 0);
     void draw_indirect(std::shared_ptr<Buffer> buffer, uint32_t offset = 0, uint32_t draw_count = 1, uint32_t stride = 0);
-    
+
     // 计算着色器
     void dispatch_compute(uint32_t groups_x, uint32_t groups_y, uint32_t groups_z);
-    
+
     // 获取后端信息
     Backend get_backend() const;
     void* get_device() const;  // VkDevice 或 无 (OpenGL)
     std::string get_backend_name() const;
-    
+
     // 调试
     void push_debug_group(const std::string& name);
     void pop_debug_group();
     void insert_debug_marker(const std::string& marker);
-    
+
     // 截图
     bool capture_screenshot(const std::filesystem::path& path);
-    
+
     // 统计信息
     struct Stats {
         uint64_t draw_calls = 0;

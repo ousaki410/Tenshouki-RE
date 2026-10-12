@@ -3,27 +3,15 @@
  */
 
 #include "renderer.hpp"
-#include "logging.hpp"
+#include "core/logging.hpp"
 #include <SDL3/SDL.h>
 #include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
+#include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace tensyoki {
-
-// Missing OpenGL 4.5 Core Profile compressed texture format constants
-#ifndef GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
-#define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT 0x83F1
-#endif
-#ifndef GL_COMPRESSED_RGBA_S3TC_DXT3_EXT
-#define GL_COMPRESSED_RGBA_S3TC_DXT3_EXT 0x83F2
-#endif
-#ifndef GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
-#define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT 0x83F3
-#endif
-#ifndef GL_COMPRESSED_RGBA_BPTC_UNORM
-#define GL_COMPRESSED_RGBA_BPTC_UNORM 0x8E8C
-#endif
 
 // === Shader Helper ===
 static GLuint compile_shader(GLenum type, const std::string& source) {
@@ -31,8 +19,8 @@ static GLuint compile_shader(GLenum type, const std::string& source) {
     const char* src = source.c_str();
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
-    
-    GLint success;
+
+    GLint success = 0;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         GLchar info_log[1024];
@@ -49,8 +37,8 @@ static GLuint link_program(GLuint vs, GLuint fs) {
     glAttachShader(program, vs);
     glAttachShader(program, fs);
     glLinkProgram(program);
-    
-    GLint success;
+
+    GLint success = 0;
     glGetProgramiv(program, GL_LINK_STATUS, &success);
     if (!success) {
         GLchar info_log[1024];
@@ -73,7 +61,7 @@ struct Renderer::Impl {
     GLuint blit_program_ = 0;
     GLuint blit_vao_ = 0;
     GLuint blit_vbo_ = 0;
-    
+
     Impl() = default;
     ~Impl() {
         if (blit_program_) glDeleteProgram(blit_program_);
@@ -81,35 +69,31 @@ struct Renderer::Impl {
         if (blit_vbo_) glDeleteBuffers(1, &blit_vbo_);
         if (default_vao_) glDeleteVertexArrays(1, &default_vao_);
     }
-    
+
     bool init_opengl(const InitParams& params) {
-        // Initialize Glad
         if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
             LOG_ERROR("Failed to initialize GLAD");
             return false;
         }
-        
+
         LOG_INFO("OpenGL Vendor: {}", reinterpret_cast<const char*>(glGetString(GL_VENDOR)));
         LOG_INFO("OpenGL Renderer: {}", reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
         LOG_INFO("OpenGL Version: {}", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
         LOG_INFO("GLSL Version: {}", reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION)));
-        
-        // Enable debug output
+
         if (params.debug_overlay) {
             glEnable(GL_DEBUG_OUTPUT);
             glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-            glDebugMessageCallback([](GLenum source, GLenum type, GLuint id, GLenum severity, 
-                                      GLsizei length, const GLchar* message, const void*) {
+            glDebugMessageCallback([](GLenum, GLenum, GLuint, GLenum severity,
+                                      GLsizei, const GLchar* message, const void*) {
                 if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
                 LOG_DEBUG("OpenGL Debug: {}", message);
             }, nullptr);
         }
-        
-        // Create default VAO
+
         glGenVertexArrays(1, &default_vao_);
         glBindVertexArray(default_vao_);
-        
-        // Create blit program for texture rendering
+
         const char* vs_src = R"(
             #version 450 core
             layout(location = 0) in vec2 a_pos;
@@ -136,8 +120,7 @@ struct Renderer::Impl {
         }
         if (vs) glDeleteShader(vs);
         if (fs) glDeleteShader(fs);
-        
-        // Create blit VAO/VBO
+
         float vertices[] = {
             -1.0f, -1.0f, 0.0f, 0.0f,
              1.0f, -1.0f, 1.0f, 0.0f,
@@ -154,8 +137,7 @@ struct Renderer::Impl {
         glEnableVertexAttribArray(1);
         glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
         glBindVertexArray(0);
-        
-        // Default state
+
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glEnable(GL_DEPTH_TEST);
@@ -163,7 +145,7 @@ struct Renderer::Impl {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
-        
+
         return true;
     }
 };
@@ -177,20 +159,18 @@ bool Renderer::init(const InitParams& params) {
     impl_->width_ = params.width;
     impl_->height_ = params.height;
     impl_->vsync_ = params.vsync;
-    
+
     if (params.backend == Backend::OpenGL || params.backend == Backend::Auto) {
-        if (!impl_->init_opengl(params)) {
-            return false;
-        }
-        return true;
+        return impl_->init_opengl(params);
     }
-    
+
     LOG_ERROR("Vulkan backend not yet implemented");
     return false;
 }
 
 void Renderer::shutdown() {
-    impl_.reset();
+    // 重新创建空 Impl, 避免 shutdown 之后其他成员函数解引用空指针
+    impl_ = std::make_unique<Impl>();
 }
 
 void Renderer::on_resize(int width, int height) {
@@ -201,11 +181,10 @@ void Renderer::on_resize(int width, int height) {
 
 void Renderer::begin_frame() {
     glViewport(0, 0, impl_->width_, impl_->height_);
-    impl_->stats_ = Stats{}; // Reset stats
+    impl_->stats_ = Stats{};
 }
 
 void Renderer::end_frame() {
-    // Frame end - stats collected
 }
 
 void Renderer::set_viewport(const Viewport& vp) {
@@ -221,7 +200,7 @@ void Renderer::set_scissor(int x, int y, int width, int height) {
 void Renderer::clear(float r, float g, float b, float a, float depth, uint32_t stencil) {
     glClearColor(r, g, b, a);
     glClearDepth(depth);
-    glClearStencil(stencil);
+    glClearStencil(static_cast<GLint>(stencil));
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 }
 
@@ -249,20 +228,20 @@ std::shared_ptr<Renderer::Pipeline> Renderer::create_pipeline(const PipelineCrea
     return nullptr;
 }
 
-std::shared_ptr<Renderer::Shader> Renderer::create_shader(ShaderStage stage, const std::vector<uint32_t>& spirv) {
-    // Minimal: not implemented yet, would need SPIR-V to GLSL translation
+std::shared_ptr<Renderer::Shader> Renderer::create_shader(ShaderStage, const std::vector<uint32_t>&) {
+    // 最小实现: 需要 SPIR-V 到 GLSL 转换, 暂未实现
     return nullptr;
 }
 
-void Renderer::bind_pipeline(std::shared_ptr<Pipeline> pipeline) {
+void Renderer::bind_pipeline(std::shared_ptr<Pipeline>) {
     // TODO: implement
 }
 
-void Renderer::bind_vertex_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset) {
+void Renderer::bind_vertex_buffer(uint32_t, std::shared_ptr<Buffer>, uint32_t) {
     // TODO: implement
 }
 
-void Renderer::bind_index_buffer(std::shared_ptr<Buffer> buffer, uint32_t offset) {
+void Renderer::bind_index_buffer(std::shared_ptr<Buffer>, uint32_t) {
     // TODO: implement
 }
 
@@ -270,33 +249,45 @@ void Renderer::bind_texture(uint32_t slot, std::shared_ptr<Texture> texture) {
     if (texture) {
         glActiveTexture(GL_TEXTURE0 + slot);
         glBindTexture(texture->get_target(), texture->get_id());
+        impl_->stats_.texture_binds++;
     }
 }
 
 void Renderer::bind_uniform_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset, uint32_t size) {
     if (buffer) {
-        glBindBufferRange(GL_UNIFORM_BUFFER, slot, buffer->get_id(), offset, size);
+        GLsizeiptr range = size ? static_cast<GLsizeiptr>(size)
+                                : static_cast<GLsizeiptr>(buffer->get_size()) - static_cast<GLsizeiptr>(offset);
+        glBindBufferRange(GL_UNIFORM_BUFFER, slot, buffer->get_id(), static_cast<GLintptr>(offset), range);
     }
 }
 
 void Renderer::draw(const DrawCall& call) {
-    glDrawArrays(GL_TRIANGLES, call.first_vertex, call.vertex_count);
+    glDrawArraysInstancedBaseInstance(GL_TRIANGLES,
+                                      static_cast<GLint>(call.first_vertex),
+                                      static_cast<GLsizei>(call.vertex_count),
+                                      static_cast<GLsizei>(call.instance_count),
+                                      call.first_instance);
     impl_->stats_.draw_calls++;
     impl_->stats_.vertices += call.vertex_count;
     impl_->stats_.triangles += call.vertex_count / 3;
 }
 
 void Renderer::draw_indexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance) {
-    glDrawElementsInstancedBaseVertexBaseInstance(GL_TRIANGLES, index_count, GL_UNSIGNED_INT, (void*)(first_index * sizeof(uint32_t)), instance_count, vertex_offset, first_instance);
+    glDrawElementsInstancedBaseVertexBaseInstance(GL_TRIANGLES,
+                                                  static_cast<GLsizei>(index_count),
+                                                  GL_UNSIGNED_INT,
+                                                  reinterpret_cast<const void*>(static_cast<uintptr_t>(first_index) * sizeof(uint32_t)),
+                                                  static_cast<GLsizei>(instance_count),
+                                                  vertex_offset, first_instance);
     impl_->stats_.draw_calls++;
     impl_->stats_.triangles += index_count / 3;
 }
 
-void Renderer::draw_indirect(std::shared_ptr<Buffer> buffer, uint32_t offset, uint32_t draw_count, uint32_t stride) {
+void Renderer::draw_indirect(std::shared_ptr<Buffer>, uint32_t, uint32_t, uint32_t) {
     // TODO: implement
 }
 
-void Renderer::dispatch_compute(uint32_t groups_x, uint32_t groups_y, uint32_t groups_z) {
+void Renderer::dispatch_compute(uint32_t, uint32_t, uint32_t) {
     // TODO: implement
 }
 
@@ -317,7 +308,7 @@ std::string Renderer::get_backend_name() const {
 }
 
 void Renderer::push_debug_group(const std::string& name) {
-    glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, name.size(), name.c_str());
+    glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, static_cast<GLsizei>(name.size()), name.c_str());
 }
 
 void Renderer::pop_debug_group() {
@@ -325,11 +316,11 @@ void Renderer::pop_debug_group() {
 }
 
 void Renderer::insert_debug_marker(const std::string& marker) {
-    glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER, 0, 
-                         GL_DEBUG_SEVERITY_NOTIFICATION, marker.size(), marker.c_str());
+    glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER, 0,
+                         GL_DEBUG_SEVERITY_NOTIFICATION, static_cast<GLsizei>(marker.size()), marker.c_str());
 }
 
-bool Renderer::capture_screenshot(const std::filesystem::path& path) {
+bool Renderer::capture_screenshot(const std::filesystem::path&) {
     // TODO: implement screenshot
     return false;
 }
@@ -343,7 +334,11 @@ void Renderer::reset_stats() {
 }
 
 // === SpriteRenderer Implementation ===
-struct SpriteRenderer::Impl {
+// 注意: SpriteRenderer 是 Renderer 的嵌套类, 必须使用完整限定名
+struct Renderer::SpriteRenderer::Impl {
+    static constexpr size_t kFloatsPerVertex = 8;
+    static constexpr size_t kVerticesPerSprite = 6;
+
     Renderer& renderer_;
     std::shared_ptr<Renderer::Texture> default_texture_;
     GLuint program_ = 0;
@@ -352,25 +347,19 @@ struct SpriteRenderer::Impl {
     size_t max_sprites_ = 10000;
     size_t sprite_count_ = 0;
     std::vector<float> vertex_data_;
-    glm::mat4 projection_;
-    
-    Impl(Renderer& r) : renderer_(r) {
-        vertex_data_.reserve(max_sprites_ * 4 * 8); // 4 vertices * 8 floats per sprite
+    glm::mat4 projection_{1.0f};
+
+    explicit Impl(Renderer& r) : renderer_(r) {
+        vertex_data_.reserve(max_sprites_ * kVerticesPerSprite * kFloatsPerVertex);
     }
-    
+
     ~Impl() {
         if (program_) glDeleteProgram(program_);
         if (vao_) glDeleteVertexArrays(1, &vao_);
         if (vbo_) glDeleteBuffers(1, &vbo_);
     }
-    
+
     bool init() {
-        // Initialize GLAD
-        if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-            LOG_ERROR("Failed to initialize GLAD");
-            return false;
-        }
-        
         const char* vs_src = R"(
             #version 450 core
             layout(location = 0) in vec2 a_pos;
@@ -402,15 +391,17 @@ struct SpriteRenderer::Impl {
         }
         if (vs) glDeleteShader(vs);
         if (fs) glDeleteShader(fs);
-        
+
         if (!program_) return false;
-        
-        // Create VAO/VBO
+
+        const GLsizeiptr buffer_bytes = static_cast<GLsizeiptr>(
+            max_sprites_ * kVerticesPerSprite * kFloatsPerVertex * sizeof(float));
+
         glGenVertexArrays(1, &vao_);
         glGenBuffers(1, &vbo_);
         glBindVertexArray(vao_);
         glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glBufferData(GL_ARRAY_BUFFER, vertex_data_.size() * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, buffer_bytes, nullptr, GL_DYNAMIC_DRAW);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
         glEnableVertexAttribArray(1);
@@ -418,9 +409,8 @@ struct SpriteRenderer::Impl {
         glEnableVertexAttribArray(2);
         glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(4 * sizeof(float)));
         glBindVertexArray(0);
-        
-        // Create default white texture
-        auto tex_info = Renderer::TextureCreateInfo{};
+
+        Renderer::TextureCreateInfo tex_info{};
         tex_info.width = 1;
         tex_info.height = 1;
         tex_info.format = Renderer::TextureCreateInfo::Format::R8G8B8A8_UNORM;
@@ -428,132 +418,137 @@ struct SpriteRenderer::Impl {
         tex_info.initial_data = white;
         tex_info.data_size = 4;
         default_texture_ = renderer_.create_texture(tex_info);
-        
+
         return true;
     }
-    
+
     void flush() {
         if (sprite_count_ == 0) return;
-        
+
         glUseProgram(program_);
         glUniformMatrix4fv(glGetUniformLocation(program_, "u_projection"), 1, GL_FALSE, glm::value_ptr(projection_));
-        
+
         if (default_texture_) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(default_texture_->get_target(), default_texture_->get_id());
         }
-        
+
         glBindVertexArray(vao_);
         glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_data_.size() * sizeof(float), vertex_data_.data());
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(sprite_count_ * 6));
+        glBufferSubData(GL_ARRAY_BUFFER, 0,
+                        static_cast<GLsizeiptr>(vertex_data_.size() * sizeof(float)),
+                        vertex_data_.data());
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(sprite_count_ * kVerticesPerSprite));
         glBindVertexArray(0);
-        
+
         vertex_data_.clear();
         sprite_count_ = 0;
     }
 };
 
-SpriteRenderer::SpriteRenderer(Renderer& renderer) : impl_(std::make_unique<Impl>(renderer)) {
-    impl_->init();
+Renderer::SpriteRenderer::SpriteRenderer(Renderer& renderer)
+    : impl_(std::make_unique<Impl>(renderer)) {
+    if (!impl_->init()) {
+        LOG_ERROR("SpriteRenderer initialization failed");
+    }
 }
 
-SpriteRenderer::~SpriteRenderer() = default;
+Renderer::SpriteRenderer::~SpriteRenderer() = default;
 
-void SpriteRenderer::begin(const glm::mat4& projection) {
+void Renderer::SpriteRenderer::begin(const glm::mat4& projection) {
     impl_->projection_ = projection;
     impl_->sprite_count_ = 0;
     impl_->vertex_data_.clear();
 }
 
-void SpriteRenderer::draw(const Sprite& sprite) {
+void Renderer::SpriteRenderer::draw(const Sprite& sprite) {
     if (impl_->sprite_count_ >= impl_->max_sprites_) {
         impl_->flush();
     }
-    
+
     auto tex = sprite.texture ? sprite.texture : impl_->default_texture_;
     if (!tex) return;
-    
-    // Calculate vertices
+
     float w = sprite.size.x;
     float h = sprite.size.y;
     float ox = w * sprite.origin.x;
     float oy = h * sprite.origin.y;
     float c = std::cos(sprite.rotation);
     float s = std::sin(sprite.rotation);
-    
+
     float x1 = -ox, y1 = -oy;
     float x2 = w - ox, y2 = -oy;
     float x3 = w - ox, y3 = h - oy;
     float x4 = -ox, y4 = h - oy;
-    
+
     auto rot = [&](float x, float y) -> std::pair<float, float> {
         return {x * c - y * s, x * s + y * c};
     };
-    
+
     auto [rx1, ry1] = rot(x1, y1);
     auto [rx2, ry2] = rot(x2, y2);
     auto [rx3, ry3] = rot(x3, y3);
     auto [rx4, ry4] = rot(x4, y4);
-    
+
     float px = sprite.position.x;
     float py = sprite.position.y;
-    
+
     float u0 = sprite.uv_rect.x;
     float v0 = sprite.uv_rect.y;
     float u1 = sprite.uv_rect.z;
     float v1 = sprite.uv_rect.w;
-    
-    // Two triangles (6 vertices)
+
+    const float cr = sprite.color.r, cg = sprite.color.g, cb = sprite.color.b, ca = sprite.color.a;
     float verts[] = {
-        rx1 + px, ry1 + py, u0, v0, sprite.color.r, sprite.color.g, sprite.color.b, sprite.color.a,
-        rx2 + px, ry2 + py, u1, v0, sprite.color.r, sprite.color.g, sprite.color.b, sprite.color.a,
-        rx3 + px, ry3 + py, u1, v1, sprite.color.r, sprite.color.g, sprite.color.b, sprite.color.a,
-        rx1 + px, ry1 + py, u0, v0, sprite.color.r, sprite.color.g, sprite.color.b, sprite.color.a,
-        rx3 + px, ry3 + py, u1, v1, sprite.color.r, sprite.color.g, sprite.color.b, sprite.color.a,
-        rx4 + px, ry4 + py, u0, v1, sprite.color.r, sprite.color.g, sprite.color.b, sprite.color.a,
+        rx1 + px, ry1 + py, u0, v0, cr, cg, cb, ca,
+        rx2 + px, ry2 + py, u1, v0, cr, cg, cb, ca,
+        rx3 + px, ry3 + py, u1, v1, cr, cg, cb, ca,
+        rx1 + px, ry1 + py, u0, v0, cr, cg, cb, ca,
+        rx3 + px, ry3 + py, u1, v1, cr, cg, cb, ca,
+        rx4 + px, ry4 + py, u0, v1, cr, cg, cb, ca,
     };
-    
-    impl_->vertex_data_.insert(impl_->vertex_data_.end(), verts, verts + 48);
+
+    impl_->vertex_data_.insert(impl_->vertex_data_.end(), std::begin(verts), std::end(verts));
     impl_->sprite_count_++;
 }
 
-void SpriteRenderer::draw_batch(const std::vector<Sprite>& sprites) {
+void Renderer::SpriteRenderer::draw_batch(const std::vector<Sprite>& sprites) {
     for (const auto& s : sprites) draw(s);
 }
 
-void SpriteRenderer::end() {
+void Renderer::SpriteRenderer::end() {
     impl_->flush();
 }
 
-void SpriteRenderer::flush() {
+void Renderer::SpriteRenderer::flush() {
     impl_->flush();
 }
 
-void SpriteRenderer::set_default_texture(std::shared_ptr<Texture> tex) {
-    impl_->default_texture_ = tex;
+void Renderer::SpriteRenderer::set_default_texture(std::shared_ptr<Texture> tex) {
+    impl_->default_texture_ = std::move(tex);
 }
 
 // === TextRenderer Implementation (Minimal) ===
-struct TextRenderer::Impl {
+struct Renderer::TextRenderer::Impl {
     Renderer& renderer_;
-    Impl(Renderer& r) : renderer_(r) {}
+    explicit Impl(Renderer& r) : renderer_(r) {}
 };
 
-TextRenderer::TextRenderer(Renderer& renderer) : impl_(std::make_unique<Impl>(renderer)) {}
+Renderer::TextRenderer::TextRenderer(Renderer& renderer)
+    : impl_(std::make_unique<Impl>(renderer)) {}
 
-TextRenderer::~TextRenderer() = default;
+Renderer::TextRenderer::~TextRenderer() = default;
 
-bool TextRenderer::load_font(const std::filesystem::path&, float) {
+bool Renderer::TextRenderer::load_font(const std::filesystem::path&, float) {
     // TODO: implement font loading (stb_truetype or freetype)
     return false;
 }
 
-void TextRenderer::draw(const TextParams&) {
+void Renderer::TextRenderer::draw(const TextParams&) {
     // TODO: implement
 }
 
-glm::vec2 TextRenderer::measure_text(const std::string&, float) const {
+glm::vec2 Renderer::TextRenderer::measure_text(const std::string&, float) const {
     return {0, 0};
 }
 

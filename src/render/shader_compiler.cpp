@@ -1,250 +1,31 @@
 /**
- * shader_compiler.cpp - DXC Shader 编译器实现 (最小可行实现)
+ * shader_compiler.cpp - 着色器编译器实现 (无外部依赖的最小实现)
+ *
+ * 已支持: GLSL->GLSL 透传, SPIR-V 头部校验/摘要, 着色器模型解析,
+ *         res_shader.bin 原始提取, D3D9 着色器版本令牌解析。
+ * 未实现: HLSL/GLSL -> SPIR-V (需要 DXC 或 glslang), 反射, MSL/WGSL 转换。
  */
 
 #include "shader_compiler.hpp"
-#include "logging.hpp"
+#include "core/logging.hpp"
+#include "resource/bin_parser.hpp"
+
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 namespace tensyoki {
 
-// Check if DXC is available
-#if defined(HAS_DXC) && HAS_DXC
-#include <dxcapi.h>
-#include <wrl/client.h>
+struct ShaderCompiler::Impl {
+    // 预留给后端状态 (例如 DXC/glslang 实例)
+};
 
-using Microsoft::WRL::ComPtr;
-
-ShaderCompiler::ShaderCompiler() {
-    HRESULT hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils_));
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to create DXC utils: 0x{:08X}", hr);
-    }
-    hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler_));
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to create DXC compiler: 0x{:08X}", hr);
-    }
-    hr = utils_->CreateDefaultIncludeHandler(&include_handler_);
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to create include handler: 0x{:08X}", hr);
-    }
-}
-
-ShaderCompiler::~ShaderCompiler() = default;
-
-ShaderCompiler::ShaderCompiler(ShaderCompiler&& other) noexcept 
-    : utils_(std::move(other.utils_))
-    , compiler_(std::move(other.compiler_))
-    , include_handler_(std::move(other.include_handler_)) {}
-
-ShaderCompiler& ShaderCompiler::operator=(ShaderCompiler&& other) noexcept {
-    if (this != &other) {
-        utils_ = std::move(other.utils_);
-        compiler_ = std::move(other.compiler_);
-        include_handler_ = std::move(other.include_handler_);
-    }
-    return *this;
-}
-
-std::vector<uint32_t> ShaderCompiler::compile_hlsl(const std::string& source, 
-                                                   const std::string& entry_point,
-                                                   ShaderStage stage,
-                                                   const std::string& profile) {
-    std::vector<uint32_t> result;
-    
-    if (!compiler_ || !utils_) {
-        LOG_ERROR("DXC not initialized");
-        return result;
-    }
-    
-    // Create source buffer
-    ComPtr<IDxcBlobEncoding> source_blob;
-    HRESULT hr = utils_->CreateBlob(source.c_str(), source.size(), CP_UTF8, &source_blob);
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to create source blob: 0x{:08X}", hr);
-        return result;
-    }
-    
-    // Prepare arguments
-    std::vector<LPCWSTR> args;
-    args.push_back(L"-E");
-    args.push_back(std::wstring(entry_point.begin(), entry_point.end()).c_str());
-    args.push_back(L"-T");
-    args.push_back(std::wstring(profile.begin(), profile.end()).c_str());
-    args.push_back(L"-Zi");  // Debug info
-    args.push_back(L"-Qstrip_reflect");  // Strip reflection
-    
-    // Compile
-    ComPtr<IDxcResult> compile_result;
-    hr = compiler_->Compile(source_blob.Get(), args.data(), static_cast<uint32_t>(args.size()), 
-                           include_handler_.Get(), IID_PPV_ARGS(&compile_result));
-    if (FAILED(hr)) {
-        LOG_ERROR("Shader compilation failed: 0x{:08X}", hr);
-        return result;
-    }
-    
-    // Check for errors
-    ComPtr<IDxcBlobUtf8> errors;
-    hr = compile_result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr);
-    if (SUCCEEDED(hr) && errors && errors->GetStringLength() > 0) {
-        LOG_ERROR("Shader compilation errors:\n{}", errors->GetStringPointer());
-        return result;
-    }
-    
-    // Get shader blob
-    ComPtr<IDxcBlob> shader_blob;
-    hr = compile_result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shader_blob), nullptr);
-    if (FAILED(hr) || !shader_blob) {
-        LOG_ERROR("Failed to get shader blob");
-        return result;
-    }
-    
-    // Convert to SPIR-V
-    result.resize(shader_blob->GetBufferSize() / sizeof(uint32_t));
-    std::memcpy(result.data(), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize());
-    
-    LOG_INFO("Compiled shader '{}' ({}) - {} bytes", entry_point, profile, shader_blob->GetBufferSize());
-    return result;
-}
-
-std::vector<uint32_t> ShaderCompiler::compile_hlsl_file(const std::filesystem::path& path,
-                                                        const std::string& entry_point,
-                                                        ShaderStage stage,
-                                                        const std::string& profile) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) {
-        LOG_ERROR("Failed to open shader file: {}", path.string());
-        return {};
-    }
-    
-    size_t size = file.tellg();
-    file.seekg(0);
-    std::string source(size, '\0');
-    file.read(&source[0], size);
-    file.close();
-    
-    return compile_hlsl(source, entry_point, stage, profile);
-}
-
-ShaderReflection ShaderCompiler::reflect(const std::vector<uint32_t>& spirv) {
-    ShaderReflection result;
-    
-    if (!utils_) return result;
-    
-    ComPtr<IDxcBlob> shader_blob;
-    HRESULT hr = utils_->CreateBlob(spirv.data(), spirv.size() * sizeof(uint32_t), 0, &shader_blob);
-    if (FAILED(hr)) return result;
-    
-    ComPtr<IDxcContainerReflection> reflection;
-    hr = utils_->CreateReflection(shader_blob.Get(), IID_PPV_ARGS(&reflection));
-    if (FAILED(hr)) return result;
-    
-    uint32_t shader_count = 0;
-    reflection->GetShaderCount(&shader_count);
-    
-    for (uint32_t i = 0; i < shader_count; ++i) {
-        ComPtr<IDxcShaderReflection> shader_reflection;
-        hr = reflection->GetShaderReflection(i, &shader_reflection);
-        if (FAILED(hr)) continue;
-        
-        DxcShaderDesc desc;
-        shader_reflection->GetDesc(&desc);
-        
-        // Input parameters
-        for (uint32_t j = 0; j < desc.InputParameterCount; ++j) {
-            DxcSignatureParameterDesc param_desc;
-            shader_reflection->GetInputParameterDesc(j, &param_desc);
-            
-            ShaderReflection::Parameter param;
-            param.name = param_desc.SemanticName ? param_desc.SemanticName : "";
-            param.register_index = param_desc.Register;
-            param.component_count = 4; // Simplified
-            result.input_parameters.push_back(param);
-        }
-        
-        // Output parameters
-        for (uint32_t j = 0; j < desc.OutputParameterCount; ++j) {
-            DxcSignatureParameterDesc param_desc;
-            shader_reflection->GetOutputParameterDesc(j, &param_desc);
-            
-            ShaderReflection::Parameter param;
-            param.name = param_desc.SemanticName ? param_desc.SemanticName : "";
-            param.register_index = param_desc.Register;
-            param.component_count = 4;
-            result.output_parameters.push_back(param);
-        }
-        
-        // Resources (CBV, SRV, UAV, Sampler)
-        for (uint32_t j = 0; j < desc.BoundResourceCount; ++j) {
-            DxcResourceBindingDesc res_desc;
-            shader_reflection->GetResourceBindingDesc(j, &res_desc);
-            
-            ShaderReflection::ResourceBinding binding;
-            binding.name = res_desc.Name ? res_desc.Name : "";
-            binding.register_index = res_desc.BindPoint;
-            binding.space = res_desc.BindSpace;
-            binding.count = res_desc.BindCount;
-            
-            switch (res_desc.Type) {
-                case DXC_RESOURCE_TYPE_CBUFFER: binding.type = ShaderReflection::ResourceBinding::Type::ConstantBuffer; break;
-                case DXC_RESOURCE_TYPE_TEXTURE: binding.type = ShaderReflection::ResourceBinding::Type::Texture; break;
-                case DXC_RESOURCE_TYPE_SAMPLER: binding.type = ShaderReflection::ResourceBinding::Type::Sampler; break;
-                case DXC_RESOURCE_TYPE_UAV_RWTYPED:
-                case DXC_RESOURCE_TYPE_UAV_RWSTRUCTURED:
-                case DXC_RESOURCE_TYPE_UAV_RWBYTEADDRESS:
-                case DXC_RESOURCE_TYPE_UAV_APPEND_STRUCTURED:
-                case DXC_RESOURCE_TYPE_UAV_CONSUME_STRUCTURED:
-                case DXC_RESOURCE_TYPE_UAV_RWSTRUCTURED_WITH_COUNTER: binding.type = ShaderReflection::ResourceBinding::Type::StorageBuffer; break;
-                default: binding.type = ShaderReflection::ResourceBinding::Type::Unknown; break;
-            }
-            
-            result.resources.push_back(binding);
-        }
-    }
-    
-    return result;
-}
-
-bool ShaderCompiler::save_spirv(const std::vector<uint32_t>& spirv, const std::filesystem::path& path) {
-    std::ofstream file(path, std::ios::binary);
-    if (!file) {
-        LOG_ERROR("Failed to open output file: {}", path.string());
-        return false;
-    }
-    file.write(reinterpret_cast<const char*>(spirv.data()), spirv.size() * sizeof(uint32_t));
-    return file.good();
-}
-
-std::string ShaderCompiler::get_profile(ShaderStage stage, bool spirv) {
-    if (spirv) {
-        switch (stage) {
-            case ShaderStage::Vertex: return "vs_6_0";
-            case ShaderStage::Pixel: return "ps_6_0";
-            case ShaderStage::Compute: return "cs_6_0";
-            case ShaderStage::Geometry: return "gs_6_0";
-            case ShaderStage::Hull: return "hs_6_0";
-            case ShaderStage::Domain: return "ds_6_0";
-        }
-    } else {
-        switch (stage) {
-            case ShaderStage::Vertex: return "vs_5_0";
-            case ShaderStage::Pixel: return "ps_5_0";
-            case ShaderStage::Compute: return "cs_5_0";
-            case ShaderStage::Geometry: return "gs_5_0";
-            case ShaderStage::Hull: return "hs_5_0";
-            case ShaderStage::Domain: return "ds_5_0";
-        }
-    }
-    return "vs_6_0";
-}
-
-#else
-
-// Fallback implementation without DXC
-ShaderCompiler::ShaderCompiler() {
-    LOG_WARN("DXC not available, shader compilation disabled");
+ShaderCompiler::ShaderCompiler() : impl_(std::make_unique<Impl>()) {
+    LOG_WARN("No HLSL/SPIR-V backend linked; ShaderCompiler runs in passthrough mode");
 }
 
 ShaderCompiler::~ShaderCompiler() = default;
@@ -252,36 +33,171 @@ ShaderCompiler::~ShaderCompiler() = default;
 ShaderCompiler::ShaderCompiler(ShaderCompiler&&) noexcept = default;
 ShaderCompiler& ShaderCompiler::operator=(ShaderCompiler&&) noexcept = default;
 
-std::vector<uint32_t> ShaderCompiler::compile_hlsl(const std::string&, 
-                                                   const std::string&,
-                                                   ShaderStage,
-                                                   const std::string&) {
-    LOG_ERROR("DXC not available, cannot compile HLSL");
-    return {};
+ShaderCompiler::CompileResult ShaderCompiler::compile(const std::string& source,
+                                                      const CompileOptions& options) {
+    CompileResult result;
+
+    if (source.empty()) {
+        result.error_message = "empty shader source";
+        return result;
+    }
+
+    if (options.source_lang == SourceLanguage::GLSL && options.target_lang == TargetLanguage::GLSL) {
+        result.glsl = source;
+        result.success = true;
+        return result;
+    }
+
+    result.error_message = "no shader compiler backend available (DXC/glslang not linked); "
+                           "only GLSL->GLSL passthrough is supported";
+    LOG_ERROR("{}", result.error_message);
+    return result;
 }
 
-std::vector<uint32_t> ShaderCompiler::compile_hlsl_file(const std::filesystem::path&,
-                                                        const std::string&,
-                                                        ShaderStage,
-                                                        const std::string&) {
-    LOG_ERROR("DXC not available, cannot compile HLSL file");
-    return {};
+ShaderCompiler::CompileResult ShaderCompiler::compile_file(const std::filesystem::path& file_path,
+                                                           const CompileOptions& options) {
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file) {
+        CompileResult result;
+        result.error_message = "failed to open shader file: " + file_path.string();
+        LOG_ERROR("{}", result.error_message);
+        return result;
+    }
+
+    std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return compile(source, options);
 }
 
-ShaderReflection ShaderCompiler::reflect(const std::vector<uint32_t>&) {
-    LOG_WARN("DXC not available, cannot reflect SPIR-V");
-    return {};
+bool ShaderCompiler::compile_directory(const std::filesystem::path& src_dir,
+                                       const std::filesystem::path& dst_dir,
+                                       const CompileOptions& base_options) {
+    std::error_code ec;
+    std::filesystem::create_directories(dst_dir, ec);
+    if (ec) {
+        LOG_ERROR("Failed to create output directory {}: {}", dst_dir.string(), ec.message());
+        return false;
+    }
+
+    bool all_ok = true;
+    size_t compiled = 0;
+    std::filesystem::directory_iterator it(src_dir, ec);
+    if (ec) {
+        LOG_ERROR("Failed to read directory {}: {}", src_dir.string(), ec.message());
+        return false;
+    }
+
+    for (const std::filesystem::directory_iterator end; it != end; it.increment(ec)) {
+        if (ec) {
+            LOG_ERROR("Directory iteration failed: {}", ec.message());
+            return false;
+        }
+        if (!it->is_regular_file(ec)) continue;
+
+        auto result = compile_file(it->path(), base_options);
+        if (!result.success) {
+            all_ok = false;
+            continue;
+        }
+
+        auto out_path = dst_dir / (it->path().stem().string() + ".glsl");
+        std::ofstream out(out_path, std::ios::binary);
+        if (!out) {
+            LOG_ERROR("Failed to write {}", out_path.string());
+            all_ok = false;
+            continue;
+        }
+        out.write(result.glsl.data(), static_cast<std::streamsize>(result.glsl.size()));
+        ++compiled;
+    }
+
+    LOG_INFO("compile_directory: {} files written to {}", compiled, dst_dir.string());
+    return all_ok;
 }
 
-bool ShaderCompiler::save_spirv(const std::vector<uint32_t>&, const std::filesystem::path&) {
-    LOG_ERROR("DXC not available, cannot save SPIR-V");
-    return false;
+bool ShaderCompiler::extract_and_compile_shaders(const std::filesystem::path& bin_path,
+                                                 const std::filesystem::path& output_dir) {
+    BinArchive archive;
+    auto load_result = archive.load_from_file(bin_path);
+    if (!load_result) {
+        LOG_ERROR("Failed to load shader archive {}: {}", bin_path.string(), to_string(load_result.error()));
+        return false;
+    }
+
+    // 目前只提取原始块, 不编译 (需要确认内容格式与编译后端)
+    LOG_WARN("extract_and_compile_shaders: compilation backend unavailable, extracting raw blobs only");
+    auto extract_result = archive.extract_all(output_dir);
+    return static_cast<bool>(extract_result);
 }
 
-std::string ShaderCompiler::get_profile(ShaderStage, bool) {
-    return "vs_6_0";
+std::vector<std::string> ShaderCompiler::get_supported_shader_models() {
+    return {"5_0", "5_1", "6_0", "6_1", "6_2", "6_3", "6_4", "6_5", "6_6"};
 }
 
-#endif
+bool ShaderCompiler::validate_spirv(const std::vector<uint32_t>& spirv, std::string* error_out) {
+    constexpr uint32_t kSpirvMagic = 0x07230203u;
+    constexpr size_t kHeaderWords = 5;
+
+    auto fail = [&](const char* message) {
+        if (error_out) *error_out = message;
+        return false;
+    };
+
+    if (spirv.size() < kHeaderWords) return fail("SPIR-V too small (less than 5 header words)");
+    if (spirv[0] != kSpirvMagic) return fail("invalid SPIR-V magic number");
+    if (spirv[3] == 0) return fail("SPIR-V id bound is zero");
+    return true;
+}
+
+std::string ShaderCompiler::disassemble_spirv(const std::vector<uint32_t>& spirv) {
+    std::string error;
+    if (!validate_spirv(spirv, &error)) {
+        return "; invalid SPIR-V: " + error + "\n";
+    }
+
+    char buffer[256];
+    std::snprintf(buffer, sizeof(buffer),
+                  "; SPIR-V\n; Version: %u.%u\n; Generator: 0x%08X\n; Bound: %u\n; Words: %zu\n",
+                  (spirv[1] >> 16) & 0xFFu, (spirv[1] >> 8) & 0xFFu,
+                  spirv[2], spirv[3], spirv.size());
+    return buffer;
+}
+
+int ShaderCompiler::hlsl_shader_model_to_version(const std::string& model) {
+    unsigned major = 0, minor = 0;
+    char tail = 0;
+    if (std::sscanf(model.c_str(), "%u_%u%c", &major, &minor, &tail) != 2) return 0;
+    if (major == 0 || major > 9 || minor > 9) return 0;
+    return static_cast<int>(major * 10 + minor);
+}
+
+namespace shader_utils {
+
+std::optional<LegacyShaderInfo> parse_legacy_shader_blob(const std::vector<uint8_t>& data) {
+    if (data.size() < 4 || (data.size() % 4) != 0) return std::nullopt;
+
+    // D3D9 着色器第一个 DWORD 是版本令牌: 高 16 位 0xFFFF=像素, 0xFFFE=顶点;
+    // 低 16 位 = (major << 8) | minor
+    const uint32_t token = static_cast<uint32_t>(data[0]) |
+                           (static_cast<uint32_t>(data[1]) << 8) |
+                           (static_cast<uint32_t>(data[2]) << 16) |
+                           (static_cast<uint32_t>(data[3]) << 24);
+    const uint32_t type = token >> 16;
+    const uint32_t major = (token >> 8) & 0xFFu;
+    const uint32_t minor = token & 0xFFu;
+
+    if ((type != 0xFFFFu && type != 0xFFFEu) || major < 1 || major > 3) return std::nullopt;
+
+    LegacyShaderInfo info;
+    info.profile = std::string(type == 0xFFFFu ? "ps_" : "vs_") + std::to_string(major) + "_" + std::to_string(minor);
+    info.bytecode = data;
+    return info;
+}
+
+std::string convert_ps20_to_modern_hlsl(const std::string& ps20_source) {
+    // TODO: 实现 ps_2_0 -> 现代 HLSL 语法转换; 当前保持原样透传
+    return ps20_source;
+}
+
+} // namespace shader_utils
 
 } // namespace tensyoki

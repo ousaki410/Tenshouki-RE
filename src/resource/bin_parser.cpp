@@ -28,7 +28,7 @@ void BinArchive::write_u32_le(std::vector<uint8_t>& data, size_t offset, uint32_
     data[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
 }
 
-// 解析辅助：不清理现有数据，用于 load_from_file 内部使用
+// 解析辅助：接管所有权并解析。注意 clear() 会重置 source_path_，调用方需在成功后再设置。
 BinResult<void> BinArchive::parse_owned(std::vector<uint8_t>&& data) {
     // 先清理
     clear();
@@ -89,23 +89,29 @@ BinResult<void> BinArchive::load_from_file(const std::filesystem::path& path) {
         return BinResult<void>::failure(BinParseError::IOError);
     }
     
-    file.read(reinterpret_cast<char*>(file_data.data()), file_size);
+    file.read(reinterpret_cast<char*>(file_data.data()), static_cast<std::streamsize>(file_size));
     if (!file) {
         LOG_ERROR("Failed to read file: {}", path.string());
         return BinResult<void>::failure(BinParseError::IOError);
     }
     
-    source_path_ = path;
-    
-    // 解析并接管所有权
-    return parse_owned(std::move(file_data));
+    // 解析并接管所有权; source_path_ 必须在 parse_owned() 之后设置
+    auto result = parse_owned(std::move(file_data));
+    if (result) {
+        source_path_ = path;
+    }
+    return result;
 }
 
 BinResult<void> BinArchive::load_from_memory(std::span<const uint8_t> data) {
     // 解析外部数据，但不接管所有权（复制到内部缓冲区以支持 view()）
     clear();
     file_data_.assign(data.begin(), data.end());
-    return parse_from_span(file_data_);
+    auto result = parse_from_span(file_data_);
+    if (!result) {
+        clear();
+    }
+    return result;
 }
 
 BinResult<void> BinArchive::parse_header(std::span<const uint8_t> data) {
@@ -181,7 +187,7 @@ BinResult<void> BinArchive::parse_index_table(std::span<const uint8_t> data) {
     entries_.reserve(header_.file_count);
     
     for (uint32_t i = 0; i < header_.file_count; ++i) {
-        size_t offset = i * ENTRY_SIZE;
+        size_t offset = static_cast<size_t>(i) * ENTRY_SIZE;
         
         BinFileEntry entry;
         entry.name_hash = read_u32_le(data, offset);
@@ -298,7 +304,7 @@ BinResult<void> BinArchive::extract_all(const std::filesystem::path& output_dir)
             continue;
         }
         
-        out.write(reinterpret_cast<const char*>(view_result->data()), view_result->size());
+        out.write(reinterpret_cast<const char*>(view_result->data()), static_cast<std::streamsize>(view_result->size()));
         if (!out) {
             LOG_ERROR("Failed to write output file: {}", out_path.string());
             failed++;

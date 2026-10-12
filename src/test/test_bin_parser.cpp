@@ -170,6 +170,10 @@ TEST_F(BinArchiveTest, InvalidMagic) {
     std::ofstream ofs(bad_path, std::ios::binary);
     uint32_t bad_magic = 0xDEADBEEF;
     ofs.write(reinterpret_cast<char*>(&bad_magic), 4);
+    char pad[100] = {0};
+    ofs.write(pad, 100);
+    ofs.flush();
+    ofs.close();
     
     BinArchive archive;
     auto result = archive.load_from_file(bad_path);
