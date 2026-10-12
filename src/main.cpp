@@ -20,6 +20,8 @@
 #include <memory>
 #include <filesystem>
 #include <chrono>
+#include <fstream>
+#include <system_error>
 
 namespace tensyoki {
 
@@ -54,6 +56,9 @@ private:
         LOG_INFO("Version: 0.1.0-dev");
         LOG_INFO("Build: {} {}", __DATE__, __TIME__);
         
+        // 加载配置
+        Config::instance().load("config.toml");
+        
         // 解析命令行参数获取数据路径
         parse_args();
         
@@ -62,9 +67,6 @@ private:
             LOG_ERROR("Failed to mount data root: {}", data_root_.string());
             return false;
         }
-        
-        // 加载配置
-        Config::instance().load("config.toml");
         
         // 初始化平台抽象
         platform_ = Platform::create();
@@ -299,12 +301,7 @@ private:
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("Extract Selected")) {
                     if (selected_entry_ && selected_archive_) {
-                        auto result = selected_archive_->extract(*selected_entry_);
-                        if (result) {
-                            LOG_INFO("Extracted '{}' ({} bytes)", selected_entry_->name, result->size());
-                        } else {
-                            LOG_ERROR("Extract failed: {}", tensyoki::to_string(result.error()));
-                        }
+                        extract_entry_to_disk(*selected_archive_, *selected_entry_);
                     }
                 }
                 if (ImGui::MenuItem("Extract All")) {
@@ -324,8 +321,7 @@ private:
         ImGui::BeginChild("LeftPane", ImVec2(350, 0), true);
         
         // Container selector
-        static std::string current_file = "res/res_grp.bin";
-        if (ImGui::BeginCombo("Container", current_file.c_str())) {
+        if (ImGui::BeginCombo("Container", current_file_.c_str())) {
             const char* files[] = {
                 "res/res_shader.bin",
                 "res/res_else.bin", 
@@ -335,22 +331,18 @@ private:
                 "res/res_exp_pc.bin"
             };
             for (const char* f : files) {
-                bool selected = (current_file == f);
+                bool selected = (current_file_ == f);
                 if (ImGui::Selectable(f, selected)) {
-                    current_file = f;
-                    // Load the selected archive
-                    BinArchive* new_archive = new BinArchive();
+                    auto new_archive = std::make_unique<BinArchive>();
                     auto result = new_archive->load_from_file(data_root_ / f);
                     if (result) {
                         LOG_INFO("Parsed {}: {} resources", f, new_archive->entries().size());
-                        // Clean up old archive if needed
-                        delete selected_archive_;
-                        selected_archive_ = new_archive;
+                        selected_entry_ = nullptr;
+                        selected_archive_ = std::move(new_archive);
+                        current_file_ = f;
                     } else {
                         LOG_WARN("Failed to parse {}: {}", f, tensyoki::to_string(result.error()));
-                        delete new_archive;
                     }
-                    selected_entry_ = nullptr;
                 }
             }
             ImGui::EndCombo();
@@ -361,7 +353,7 @@ private:
         if (selected_archive_) {
             ImGui::Text("Entries: %zu", selected_archive_->entries().size());
             ImGui::SameLine();
-            ImGui::Text("(%s)", current_file.c_str());
+            ImGui::Text("(%s)", current_file_.c_str());
         }
         ImGui::Separator();
         
@@ -379,7 +371,6 @@ private:
                 bool opened = ImGui::TreeNodeEx(entry.name.c_str(), flags);
                 if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
                     selected_entry_ = &entry;
-                    selected_archive_ = selected_archive_;
                 }
                 if (opened) ImGui::TreePop();
             }
@@ -415,12 +406,7 @@ private:
         
         // Action buttons
         if (ImGui::Button("Extract")) {
-            auto result = archive.extract(entry);
-            if (result) {
-                LOG_INFO("Extracted '{}' ({} bytes)", entry.name, result->size());
-            } else {
-                LOG_ERROR("Extract failed: {}", tensyoki::to_string(result.error()));
-            }
+            extract_entry_to_disk(archive, entry);
         }
         ImGui::SameLine();
         if (ImGui::Button("View Hex Dump")) {
@@ -487,8 +473,39 @@ private:
                                    tensyoki::to_string(view_result.error()));
             }
         }
-        
-        ImGui::EndChild();
+    }
+    
+    bool extract_entry_to_disk(const BinArchive& archive, const BinFileEntry& entry) {
+        auto result = archive.extract(entry);
+        if (!result) {
+            LOG_ERROR("Extract failed: {}", tensyoki::to_string(result.error()));
+            return false;
+        }
+
+        std::filesystem::path name = std::filesystem::path(entry.name).filename();
+        if (name.empty() || name == "." || name == "..") {
+            name = fmt::format("entry_{:08X}.bin", entry.name_hash);
+        }
+
+        const auto dir = std::filesystem::path("extracted") /
+                         std::filesystem::path(current_file_).stem();
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        if (ec) {
+            LOG_ERROR("Cannot create {}: {}", dir.string(), ec.message());
+            return false;
+        }
+
+        const auto out_path = dir / name;
+        std::ofstream out(out_path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(result->data()),
+                  static_cast<std::streamsize>(result->size()));
+        if (!out) {
+            LOG_ERROR("Failed to write {}", out_path.string());
+            return false;
+        }
+        LOG_INFO("Extracted '{}' -> {} ({} bytes)", entry.name, out_path.string(), result->size());
+        return true;
     }
     
     bool show_hex_dump_ = true;
@@ -511,8 +528,9 @@ private:
     bool show_shader_viewer_ = false;
     bool show_dat_viewer_ = false;
 
-    BinArchive* selected_archive_ = nullptr;
+    std::unique_ptr<BinArchive> selected_archive_;
     const BinFileEntry* selected_entry_ = nullptr;
+    std::string current_file_ = "res/res_grp.bin";
 };
 
 } // namespace tensyoki

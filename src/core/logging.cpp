@@ -20,15 +20,20 @@ void Logging::init(const std::string& log_file,
     console_sink_->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
     
     // 创建文件 sink (轮转日志，最大 10MB，保留 5 个)
+    std::string file_error;
     try {
-        std::filesystem::create_directories(std::filesystem::path(log_file).parent_path());
+        const auto parent = std::filesystem::path(log_file).parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
         file_sink_ = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
             log_file, 1024 * 1024 * 10, 5);
         file_sink_->set_level(file_level);
         file_sink_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%t] %v");
     } catch (const std::exception& e) {
         // 文件创建失败时仅使用控制台
-        console_sink_->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v (file log failed: " + std::string(e.what()) + ")");
+        file_sink_.reset();
+        file_error = e.what();
     }
     
     // 创建组合 logger
@@ -42,17 +47,28 @@ void Logging::init(const std::string& log_file,
     spdlog::register_logger(logger_);
     spdlog::set_default_logger(logger_);
     
+    if (!file_error.empty()) {
+        SPDLOG_WARN("File logging disabled: {}", file_error);
+    }
+    
     SPDLOG_INFO("Logging initialized: console={}, file={}", 
                 spdlog::level::to_string_view(console_level),
                 file_sink_ ? spdlog::level::to_string_view(file_level) : "disabled");
 }
 
 void Logging::shutdown() {
-    if (logger_) {
-        logger_->flush();
-        spdlog::drop("tensyoki");
-        logger_.reset();
+    if (!logger_) return;                      // 幂等
+    logger_->flush();
+    
+    // 安全地替换默认 logger，避免重名
+    auto fallback = spdlog::get("tensyoki_fallback");
+    if (!fallback) {
+        fallback = spdlog::stderr_color_mt("tensyoki_fallback");
     }
+    spdlog::set_default_logger(fallback);
+    
+    spdlog::drop("tensyoki");
+    logger_.reset();
     console_sink_.reset();
     file_sink_.reset();
 }
