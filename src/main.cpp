@@ -31,6 +31,7 @@ public:
     
     int run() {
         if (!init()) {
+            Logging::shutdown();
             return 1;
         }
         
@@ -48,6 +49,7 @@ private:
     std::unique_ptr<ImGuiBackend> imgui_;
     std::unique_ptr<Platform> platform_;
     std::filesystem::path data_root_;
+    std::string imgui_ini_path_;  // ImGui ini 文件路径，需在 init() 期间保持有效
     
     bool init() {
         // 初始化日志
@@ -67,6 +69,9 @@ private:
             LOG_ERROR("Failed to mount data root: {}", data_root_.string());
             return false;
         }
+        
+        // 准备 ImGui ini 文件路径（需在 init() 期间保持有效）
+        imgui_ini_path_ = (VFS::instance().get_user_data_dir() / "imgui.ini").string();
         
         // 初始化平台抽象
         platform_ = Platform::create();
@@ -104,7 +109,7 @@ private:
         imgui_params.device = renderer_->get_device();
         imgui_params.enable_docking = true;
         imgui_params.enable_viewports = true;
-        imgui_params.ini_filename = (VFS::instance().get_user_data_dir() / "imgui.ini").string();
+        imgui_params.ini_filename = imgui_ini_path_.c_str();
         
         if (!imgui_->init(imgui_params)) {
             LOG_ERROR("ImGui initialization failed");
@@ -306,7 +311,12 @@ private:
                 }
                 if (ImGui::MenuItem("Extract All")) {
                     if (selected_archive_) {
-                        selected_archive_->extract_all("extracted/");
+                        const auto dir = std::filesystem::path("extracted") /
+                                         std::filesystem::path(current_file_).stem();
+                        auto result = selected_archive_->extract_all(dir);
+                        if (!result) {
+                            LOG_ERROR("Extract All failed: {}", tensyoki::to_string(result.error()));
+                        }
                     }
                 }
                 ImGui::EndMenu();
@@ -497,6 +507,9 @@ private:
         }
 
         const auto out_path = dir / name;
+        if (std::filesystem::exists(out_path)) {
+            LOG_WARN("Overwriting existing file: {}", out_path.string());
+        }
         std::ofstream out(out_path, std::ios::binary);
         out.write(reinterpret_cast<const char*>(result->data()),
                   static_cast<std::streamsize>(result->size()));

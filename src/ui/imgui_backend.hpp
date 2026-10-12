@@ -21,7 +21,7 @@ public:
         void* device = nullptr;         // 后端设备指针
         bool enable_docking = true;
         bool enable_viewports = true;
-        std::string ini_filename = "imgui.ini";
+        const char* ini_filename = "imgui.ini";  // 用 const char* 避免生命周期问题
         float font_scale = 1.0f;
     };
     

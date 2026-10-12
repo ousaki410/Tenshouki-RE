@@ -17,6 +17,7 @@ struct ImGuiBackend::Impl {
     bool initialized = false;
     bool use_vulkan = false;
     SDL_Window* window = nullptr;
+    std::string ini_filename;  // 存储 ini 文件名，保证生命周期
 };
 
 ImGuiBackend::ImGuiBackend() : impl_(std::make_unique<Impl>()) {}
@@ -33,6 +34,9 @@ bool ImGuiBackend::init(const InitParams& params) {
         LOG_ERROR("Invalid window handle");
         return false;
     }
+    
+    // 保存 ini 文件名，确保生命周期覆盖整个 ImGui 上下文
+    impl_->ini_filename = params.ini_filename ? params.ini_filename : "imgui.ini";
     
     // 创建 ImGui 上下文
     impl_->ctx = ImGui::CreateContext();
@@ -51,7 +55,7 @@ bool ImGuiBackend::init(const InitParams& params) {
     //     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     // }
     
-    io.IniFilename = params.ini_filename.c_str();
+    io.IniFilename = impl_->ini_filename.c_str();
     io.FontGlobalScale = params.font_scale;
     
     // 初始化 SDL3 后端
