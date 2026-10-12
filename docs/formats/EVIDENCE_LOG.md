@@ -48,7 +48,7 @@ Record only what was observed. Keep raw hex excerpts to 64 bytes or fewer.
 
 ## Entries
 
-Common to E-0001..E-0010: date 2026-10-12; method static inspection (`ls`, `sha256sum`, `xxd`, `tools/link_check.py`); provenance is a third-party repackaged distribution, to be re-verified against retail Steam files.
+Common to E-0001..E-0015: date 2026-10-12; method static inspection (`ls`, `sha256sum`, `xxd`, `tools/link_check.py`); provenance is a third-party repackaged distribution, to be re-verified against retail Steam files.
 
 ### E-0001: res/res_grp.bin header
 
@@ -110,11 +110,12 @@ Common to E-0001..E-0010: date 2026-10-12; method static inspection (`ls`, `sha2
   - res_exp: 1, {}, 263632, 263636
   - res_exp_pc: 1, {}, 8396, 8400
   - res_grp: 21, {4: 20}, 365574992, 365574996
-  - res_shader: 6, {4: 5}, 6292 (counting two empty entries), 6284
+  - res_shader: 6, {4: 5}, 6292 (counting empty entries), 6284
   - res_snd: 2, {4: 1}, 3914540, 3914544
-- Detail for res_shader: the original script flagged entries 4 and 5 (offset 6288 and 6292, size 0) as out of bounds. Version 1 of the script treated empty entries as out of bounds; the script now allows empty entries beyond EOF.
+- Detail for res_shader: the first version of the script flagged entries 4 and 5 (offset 6288 and 6292, size 0) as out of bounds. The script now allows empty entries beyond EOF.
+- Note: the interpretation of `res_shader.bin` first written next to this entry was wrong; see E-0015.
 - Related: link.md sections 4 to 6
-- Result: supports (with the res_shader exception)
+- Result: supports
 
 ### E-0009: nested LINK header of res_grp entry 0
 
@@ -128,4 +129,41 @@ Common to E-0001..E-0010: date 2026-10-12; method static inspection (`ls`, `sha2
 
 - Method: arithmetic over E-0003, E-0004, and E-0009.
 - Observation: for the three nested containers, data start equals `(0x40 + 12 * n) rounded down to 16, plus 16` with n = 372, 111, and 2 giving 0x11C0, 0x580, and 0x60.
-- Result: supports a hypothesis only; no descriptor record has been decoded yet.
+- Result: supports a hypothesis only.
+
+### E-0011: res_grp entry 0 descriptor records
+
+- Command: `xxd -s 248 -l 64 res/res_grp.bin` (file offset 248 = 184 + 0x40, the descriptor table start)
+- Observation: ten bytes-groups starting at 0xF8 decode as 12-byte records (x, y, w, h, last): (528, 452, 33, 33, 0), (92, 620, 10, 33, 0), (102, 620, 13, 33, 0), (115, 620, 10, 33, 0), (812, 604, 10, 33, 0), and the next record begins with x = 822. On the same row, x + w equals the next x.
+- Hex excerpt (first 16 bytes): `1002c401 21002100 00000000 5c006c02`
+- Related: link.md section 7
+- Result: supports
+
+### E-0012: res_grp later descriptor records (offset error in the request)
+
+- Command: `xxd -s 4600 -l 64 res/res_grp.bin`
+- Note: this was intended to dump the data start (184 + 0x11C0). That sum is 4,728, not 4,600; the request contained an arithmetic error. The dump instead landed inside the descriptor table.
+- Observation: record boundaries from 0xF8 in steps of 12 put record 363 at 0x11FC. Records 363 to 367 decode as (64, 688, 48, 32), (480, 720, 30, 30), (148, 704, 42, 26), (948, 748, 20, 20), (968, 748, 20, 20); 948 + 20 = 968. Records reach x + w = 988 and y + h = 768.
+- Related: link.md section 7
+- Result: supports
+
+### E-0013: gap bytes in res_exp_pc.bin
+
+- Command: `xxd -s 8396 -l 4 res/res_exp_pc.bin`
+- Observation: bytes `ef cd ab 89` (little-endian u32 0x89ABCDEF) at the 4 bytes after the only payload.
+- Related: link.md section 6
+- Result: supports a sentinel hypothesis (one gap inspected)
+
+### E-0014: res_shader.bin header and first payload
+
+- Command: `xxd -s 0 -l 128 res/res_shader.bin`
+- Observation: `LINK`, count 6; entries (0x40, 0xDAC), (0xDF0, 0x428), (0x121C, 0x66C), (0x188C, 0), (0x1890, 0), (0x1894, 0). The first payload at 0x40 begins `00 02 ff ff fe ff fb 01` followed by ASCII `DBUG`, and a path string beginning `C:\Project\` appears at 0x70.
+- Related: link.md sections 6 and 8
+- Result: supports
+
+### E-0015: correction of the res_shader tail analysis
+
+- Reason: E-0008 and the earlier version of link.md said entry 3 of `res_shader.bin` ends at the file size and that the file has no 4-byte tail. That was inferred from the gap histogram and is wrong.
+- Observation (from E-0014): entry 2 is (0x121C, 0x66C) and ends at 0x1888 = 6,280; entry 3 is an empty entry at offset 0x188C = 6,284 (the file size). The file therefore has the same 4-byte tail as the other five files, and entries 3 to 5 are empty.
+- Effect: the exception in link.md was removed; all six files satisfy `last non-empty end + 4 = file size`.
+- Result: contradicts the earlier interpretation
