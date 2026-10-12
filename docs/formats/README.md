@@ -14,17 +14,22 @@ This directory documents the file formats of the game data that this project rea
 5. **No protected code.** Executables are protected by an executable wrapper and are out of scope. Formats are derived from data files and observed behavior only.
 6. **Clean-room discipline.** Community documentation may be used to cross-check field meaning. Do not copy code from repositories without an explicit license.
 7. **Test coupling.** Each `confirmed` structure should have a parser unit test that uses a synthetic fixture matching the documented layout.
+8. **Provenance.** Record where each sample came from. Promote a field to `confirmed` only from retail files that were legitimately purchased.
 
 ## Index
 
 | Format | Document | Status |
 | --- | --- | --- |
-| BIN archive | `bin.md` | not started |
+| LINK container (res/*.bin) | [link.md](link.md) | draft |
 | GRP image | `grp.md` | not started |
-| DAT data | `dat.md` | not started |
+| DAT data (BDAT, scenario, MSG) | `dat.md` | not started |
 | Save file | `save.md` | not started |
 
 Create a new document by copying [TEMPLATE.md](TEMPLATE.md).
+
+## Tools
+
+- `tools/link_check.py`: validates the top-level table of LINK containers.
 
 ## Workflow
 
