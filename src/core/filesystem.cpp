@@ -1,5 +1,5 @@
 /**
- * filesystem.cpp - VFS 实现
+ * filesystem.cpp - VFS implementation
  */
 
 #include "filesystem.hpp"
@@ -70,9 +70,9 @@ private:
 
 std::string VFS::normalize_path(const std::string& path) const {
     std::string result = path;
-    // 统一分隔符
+    // Unify separators
     std::replace(result.begin(), result.end(), '\\', '/');
-    // 移除多余斜杠
+    // Remove redundant slashes
     std::string cleaned;
     cleaned.reserve(result.size());
     bool last_slash = false;
@@ -85,11 +85,11 @@ std::string VFS::normalize_path(const std::string& path) const {
             last_slash = false;
         }
     }
-    // 移除尾部斜杠 (根目录除外)
+    // Remove trailing slash (except root)
     if (cleaned.size() > 1 && cleaned.back() == '/') {
         cleaned.pop_back();
     }
-    // 大小写不敏感时转小写
+    // Convert to lowercase when case-insensitive
     if (!case_sensitive_) {
         std::transform(cleaned.begin(), cleaned.end(), cleaned.begin(), 
                        [](unsigned char c) { return std::tolower(c); });
@@ -108,11 +108,11 @@ bool VFS::mount(const std::filesystem::path& physical_path, const std::string& v
     mp.virtual_path = normalize_path(virtual_path);
     mp.physical_path = abs_path;
     mp.is_bin_container = false;
-    mp.priority = static_cast<int>(mounts_.size());  // 后挂载优先级高
+    mp.priority = static_cast<int>(mounts_.size());  // later mounts have higher priority
     
     std::unique_lock lock(mounts_mutex_);
     mounts_.push_back(std::move(mp));
-    // 按优先级排序 (高优先级在前)
+    // Sort by priority (highest first)
     std::sort(mounts_.begin(), mounts_.end(), 
               [](const MountPoint& a, const MountPoint& b) { return a.priority > b.priority; });
     
@@ -121,7 +121,7 @@ bool VFS::mount(const std::filesystem::path& physical_path, const std::string& v
 }
 
 bool VFS::mount_bin(const std::filesystem::path& bin_path, const std::string& virtual_path) {
-    // TODO: 实现 .bin 容器挂载 (需要 BinParser 支持)
+    // TODO: implement .bin container mounting (requires BinParser support)
     LOG_WARN("BIN container mount not yet implemented: {}", bin_path.string());
     return false;
 }
@@ -146,7 +146,7 @@ std::optional<std::filesystem::path> VFS::find_file(const std::string& virtual_p
     
     std::shared_lock lock(mounts_mutex_);
     for (const auto& mp : mounts_) {
-        // 构造物理路径
+        // Build physical path
         std::string rel_path = norm;
         if (mp.virtual_path != "/") {
             if (norm.rfind(mp.virtual_path, 0) == 0) {
@@ -155,11 +155,11 @@ std::optional<std::filesystem::path> VFS::find_file(const std::string& virtual_p
                     rel_path = "/" + rel_path;
                 }
             } else {
-                continue;  // 不在该挂载点下
+                continue;  // not under this mount point
             }
         }
         
-        auto physical = mp.physical_path / rel_path.substr(1);  // 去掉开头的 /
+        auto physical = mp.physical_path / rel_path.substr(1);  // strip leading /
         
         if (std::filesystem::exists(physical) && std::filesystem::is_regular_file(physical)) {
             return physical;
@@ -184,7 +184,7 @@ std::unique_ptr<FileHandle> VFS::open_read(const std::string& virtual_path) {
 }
 
 std::unique_ptr<FileHandle> VFS::open_write(const std::string& virtual_path, bool append) {
-    // 写入只允许在用户数据目录
+    // Writes are only allowed in the user data directory
     auto user_dir = get_user_data_dir();
     auto full_path = user_dir / virtual_path.substr(virtual_path[0] == '/' ? 1 : 0);
     
@@ -242,7 +242,7 @@ std::vector<std::string> VFS::list_directory(const std::string& virtual_path) co
         }
     }
     
-    // 去重
+    // Deduplicate
     std::sort(result.begin(), result.end());
     result.erase(std::unique(result.begin(), result.end()), result.end());
     
@@ -254,7 +254,7 @@ std::optional<std::filesystem::path> VFS::resolve(const std::string& virtual_pat
 }
 
 std::filesystem::path VFS::get_user_data_dir() const {
-    // 优先级: 环境变量 > XDG_DATA_HOME > ~/.local/share
+    // Priority: environment variable > XDG_DATA_HOME > ~/.local/share
     if (const char* env = std::getenv("TENSYOKI_USER_DATA")) {
         return std::filesystem::path(env);
     }

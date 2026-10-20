@@ -1,5 +1,5 @@
 /**
- * bin_parser.cpp - 光荣游戏通用 .bin 容器解析器实现
+ * bin_parser.cpp - Implementation of the generic Koei game .bin container parser
  */
 
 #include "bin_parser.hpp"
@@ -11,7 +11,7 @@
 
 namespace tensyoki {
 
-// 小端读取工具
+// Little-endian read helpers
 uint32_t BinArchive::read_u32_le(std::span<const uint8_t> data, size_t offset) {
     if (offset + 4 > data.size()) return 0;
     return static_cast<uint32_t>(data[offset]) |
@@ -28,15 +28,15 @@ void BinArchive::write_u32_le(std::vector<uint8_t>& data, size_t offset, uint32_
     data[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
 }
 
-// 解析辅助：接管所有权并解析。注意 clear() 会重置 source_path_，调用方需在成功后再设置。
+// Parse helper: take ownership and parse. Note that clear() resets source_path_, so the caller must set it afterwards on success.
 BinResult<void> BinArchive::parse_owned(std::vector<uint8_t>&& data) {
-    // 先清理
+    // Clear first
     clear();
     
-    // 取得所有权
+    // Take ownership
     file_data_ = std::move(data);
     
-    // 解析
+    // Parse
     auto result = parse_from_span(file_data_);
     if (!result) {
         clear();
@@ -44,18 +44,18 @@ BinResult<void> BinArchive::parse_owned(std::vector<uint8_t>&& data) {
     return result;
 }
 
-// 解析辅助：从 span 解析，不接管所有权
+// Parse helper: parse from a span without taking ownership
 BinResult<void> BinArchive::parse_from_span(std::span<const uint8_t> data) {
-    // 1. 解析头部
+    // 1. Parse header
     auto header_result = parse_header(data);
     if (!header_result) return header_result;
     
-    // 2. 解析索引表
+    // 2. Parse index table
     auto index_span = data.subspan(header_.index_offset, header_.index_size);
     auto index_result = parse_index_table(index_span);
     if (!index_result) return index_result;
     
-    // 3. 验证数据块
+    // 3. Validate data blocks
     auto validate_result = validate_data_blocks();
     if (!validate_result) return validate_result;
     
@@ -67,20 +67,20 @@ BinResult<void> BinArchive::parse_from_span(std::span<const uint8_t> data) {
 BinResult<void> BinArchive::load_from_file(const std::filesystem::path& path) {
     LOG_INFO("Loading BIN archive: {}", path.string());
     
-    // 检查文件存在
+    // Check that the file exists
     if (!std::filesystem::exists(path)) {
         LOG_ERROR("File not found: {}", path.string());
         return BinResult<void>::failure(BinParseError::FileNotFound);
     }
     
-    // 获取文件大小
+    // Get file size
     auto file_size = std::filesystem::file_size(path);
     if (file_size < sizeof(Header)) {
         LOG_ERROR("File too small ({} bytes, min {}): {}", file_size, sizeof(Header), path.string());
         return BinResult<void>::failure(BinParseError::FileTooSmall);
     }
     
-    // 读取文件到局部缓冲区
+    // Read the file into a local buffer
     std::vector<uint8_t> file_data;
     file_data.resize(file_size);
     std::ifstream file(path, std::ios::binary);
@@ -95,7 +95,7 @@ BinResult<void> BinArchive::load_from_file(const std::filesystem::path& path) {
         return BinResult<void>::failure(BinParseError::IOError);
     }
     
-    // 解析并接管所有权; source_path_ 必须在 parse_owned() 之后设置
+    // Parse and take ownership; source_path_ must be set after parse_owned()
     auto result = parse_owned(std::move(file_data));
     if (result) {
         source_path_ = path;
@@ -104,7 +104,7 @@ BinResult<void> BinArchive::load_from_file(const std::filesystem::path& path) {
 }
 
 BinResult<void> BinArchive::load_from_memory(std::span<const uint8_t> data) {
-    // 解析外部数据，但不接管所有权（复制到内部缓冲区以支持 view()）
+    // Parse external data without taking ownership (copied into the internal buffer to support view())
     clear();
     file_data_.assign(data.begin(), data.end());
     auto result = parse_from_span(file_data_);
@@ -120,10 +120,10 @@ BinResult<void> BinArchive::parse_header(std::span<const uint8_t> data) {
         return BinResult<void>::failure(BinParseError::FileTooSmall);
     }
     
-    // 读取魔数
+    // Read magic number
     std::string_view magic(reinterpret_cast<const char*>(data.data()), 4);
     if (magic != "LINK") {
-        // 尝试小端读取 uint32
+        // Try reading a little-endian uint32
         uint32_t magic_val = read_u32_le(data, 0);
         if (magic_val != MAGIC_LINK) {
             LOG_ERROR("Invalid magic: 0x{:08X} (expected 0x{:08X} 'LINK')", magic_val, MAGIC_LINK);
@@ -131,32 +131,32 @@ BinResult<void> BinArchive::parse_header(std::span<const uint8_t> data) {
         }
     }
     
-    // 解析头部字段(小端序)
+    // Parse header fields (little-endian)
     header_.version     = read_u32_le(data, 4);
     header_.file_count  = read_u32_le(data, 8);
     header_.index_offset = read_u32_le(data, 12);
     header_.index_size   = read_u32_le(data, 16);
     header_.data_offset  = read_u32_le(data, 20);
     header_.flags        = read_u32_le(data, 24);
-    // reserved 字段忽略
+    // reserved field ignored
     
     LOG_DEBUG("Header: version={}, files={}, index_off=0x{:X}, index_sz={}, data_off=0x{:X}, flags=0x{:X}",
               header_.version, header_.file_count, header_.index_offset, 
               header_.index_size, header_.data_offset, header_.flags);
     
-    // 版本检查
+    // Version check
     if (header_.version < SUPPORTED_VERSION_MIN || header_.version > SUPPORTED_VERSION_MAX) {
         LOG_WARN("Unsupported version {}, attempting anyway", header_.version);
-        // 不返回错误，尝试兼容
+        // Do not return an error; attempt compatibility
     }
     
-    // 基本合理性检查
+    // Basic sanity check
     if (header_.file_count > 100000) {
         LOG_ERROR("Suspicious file count: {}", header_.file_count);
         return BinResult<void>::failure(BinParseError::CorruptedIndex);
     }
     
-    // 使用 64 位运算避免溢出
+    // Use 64-bit arithmetic to avoid overflow
     uint64_t index_end = static_cast<uint64_t>(header_.index_offset) + static_cast<uint64_t>(header_.index_size);
     if (index_end > data.size()) {
         LOG_ERROR("Index table extends beyond file: off=0x{:X}+0x{:X} > size=0x{:X}",
@@ -175,7 +175,7 @@ BinResult<void> BinArchive::parse_header(std::span<const uint8_t> data) {
 BinResult<void> BinArchive::parse_index_table(std::span<const uint8_t> data) {
     constexpr size_t ENTRY_SIZE = sizeof(IndexEntry);
     
-    // 使用 64 位运算避免溢出
+    // Use 64-bit arithmetic to avoid overflow
     uint64_t required_size = static_cast<uint64_t>(header_.file_count) * ENTRY_SIZE;
     if (data.size() < required_size) {
         LOG_ERROR("Index table too small: {} bytes for {} entries (need {})",
@@ -197,7 +197,7 @@ BinResult<void> BinArchive::parse_index_table(std::span<const uint8_t> data) {
         entry.type      = read_u32_le(data, offset + 16);
         // reserved at offset + 20
         
-        // 生成默认名称
+        // Generate a default name
         entry.name = fmt::format("file_{:04d}_{:08X}", i, entry.name_hash);
         
         entries_.push_back(std::move(entry));
@@ -338,23 +338,23 @@ void BinArchive::clear() noexcept {
 }
 
 std::string BinFileEntry::guess_extension() const {
-    // 基于类型和标志推测扩展名
+    // Guess the extension from type and flags
     switch (type) {
-        case 1:  return ".tex";   // 纹理
-        case 2:  return ".mdl";   // 模型
-        case 3:  return ".shd";   // 着色器
-        case 4:  return ".snd";   // 音频
-        case 5:  return ".txt";   // 文本
-        case 6:  return ".scr";   // 脚本
-        case 7:  return ".anim";  // 动画
-        case 8:  return ".ui";    // UI资源
-        case 9:  return ".fnt";   // 字体
-        case 10: return ".vid";   // 视频
-        case 11: return ".dat";   // 数据表
+        case 1:  return ".tex";   // texture
+        case 2:  return ".mdl";   // model
+        case 3:  return ".shd";   // shader
+        case 4:  return ".snd";   // audio
+        case 5:  return ".txt";   // text
+        case 6:  return ".scr";   // script
+        case 7:  return ".anim";  // animation
+        case 8:  return ".ui";    // UI resource
+        case 9:  return ".fnt";   // font
+        case 10: return ".vid";   // video
+        case 11: return ".dat";   // data table
         default:
-            // 基于文件名哈希或内容推测
-            if (flags & 0x1) return ".cmp";  // 压缩
-            if (flags & 0x2) return ".enc";  // 加密
+            // Guess from the file name hash or content
+            if (flags & 0x1) return ".cmp";  // compressed
+            if (flags & 0x2) return ".enc";  // encrypted
             return ".bin";
     }
 }

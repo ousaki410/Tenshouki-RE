@@ -1,9 +1,9 @@
 /**
- * shader_compiler.cpp - 着色器编译器实现 (无外部依赖的最小实现)
+ * shader_compiler.cpp - Shader compiler implementation (minimal, no external dependencies)
  *
- * 已支持: GLSL->GLSL 透传, SPIR-V 头部校验/摘要, 着色器模型解析,
- *         res_shader.bin 原始提取, D3D9 着色器版本令牌解析。
- * 未实现: HLSL/GLSL -> SPIR-V (需要 DXC 或 glslang), 反射, MSL/WGSL 转换。
+ * Supported: GLSL->GLSL passthrough, SPIR-V header validation/summary, shader model parsing,
+ *         raw extraction from res_shader.bin, D3D9 shader version token parsing.
+ * Not implemented: HLSL/GLSL -> SPIR-V (requires DXC or glslang), reflection, MSL/WGSL conversion.
  */
 
 #include "shader_compiler.hpp"
@@ -21,7 +21,7 @@
 namespace tensyoki {
 
 struct ShaderCompiler::Impl {
-    // 预留给后端状态 (例如 DXC/glslang 实例)
+    // Reserved for backend state (e.g. DXC/glslang instances)
 };
 
 ShaderCompiler::ShaderCompiler() : impl_(std::make_unique<Impl>()) {
@@ -123,7 +123,7 @@ bool ShaderCompiler::extract_and_compile_shaders(const std::filesystem::path& bi
         return false;
     }
 
-    // 目前只提取原始块, 不编译 (需要确认内容格式与编译后端)
+    // Currently only extracts the raw block without compiling (content format and compile backend need confirmation)
     LOG_WARN("extract_and_compile_shaders: compilation backend unavailable, extracting raw blobs only");
     auto extract_result = archive.extract_all(output_dir);
     return static_cast<bool>(extract_result);
@@ -175,8 +175,8 @@ namespace shader_utils {
 std::optional<LegacyShaderInfo> parse_legacy_shader_blob(const std::vector<uint8_t>& data) {
     if (data.size() < 4 || (data.size() % 4) != 0) return std::nullopt;
 
-    // D3D9 着色器第一个 DWORD 是版本令牌: 高 16 位 0xFFFF=像素, 0xFFFE=顶点;
-    // 低 16 位 = (major << 8) | minor
+    // The first DWORD of a D3D9 shader is the version token: high 16 bits 0xFFFF=pixel, 0xFFFE=vertex;
+    // low 16 bits = (major << 8) | minor
     const uint32_t token = static_cast<uint32_t>(data[0]) |
                            (static_cast<uint32_t>(data[1]) << 8) |
                            (static_cast<uint32_t>(data[2]) << 16) |
@@ -194,7 +194,7 @@ std::optional<LegacyShaderInfo> parse_legacy_shader_blob(const std::vector<uint8
 }
 
 std::string convert_ps20_to_modern_hlsl(const std::string& ps20_source) {
-    // TODO: 实现 ps_2_0 -> 现代 HLSL 语法转换; 当前保持原样透传
+    // TODO: implement ps_2_0 -> modern HLSL syntax conversion; currently passed through unchanged
     return ps20_source;
 }
 

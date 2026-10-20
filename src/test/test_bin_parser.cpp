@@ -1,5 +1,5 @@
 /**
- * test_bin_parser.cpp - 单元测试
+ * test_bin_parser.cpp - unit tests
  */
 
 #include "gtest/gtest.h"
@@ -17,11 +17,11 @@ protected:
     void SetUp() override {
         Logging::init("test.log", spdlog::level::off, spdlog::level::debug);
         
-        // 创建临时测试文件
+        // Create temporary test file
         test_dir_ = std::filesystem::temp_directory_path() / "tensyoki_test";
         std::filesystem::create_directories(test_dir_);
         
-        // 创建测试用 .bin 文件
+        // Create test .bin file
         create_test_bin();
     }
     
@@ -34,13 +34,13 @@ protected:
         test_bin_path_ = test_dir_ / "test.bin";
         std::ofstream ofs(test_bin_path_, std::ios::binary);
         
-        // 写入 LINK 头部 (44 bytes)
+        // Write LINK header (44 bytes)
         uint32_t magic = 0x4B4E494C;  // "LINK" little-endian
         uint32_t version = 1;
         uint32_t file_count = 2;
-        uint32_t index_offset = 44;   // 头部后
-        uint32_t index_size = 2 * 24; // 2 个索引条目
-        uint32_t data_offset = 44 + 48; // 头部 + 索引表
+        uint32_t index_offset = 44;   // after header
+        uint32_t index_size = 2 * 24; // 2 index entries
+        uint32_t data_offset = 44 + 48; // header + index table
         uint32_t flags = 0;
         uint32_t reserved[4] = {0};
         
@@ -53,16 +53,16 @@ protected:
         ofs.write(reinterpret_cast<char*>(&flags), 4);
         ofs.write(reinterpret_cast<char*>(reserved), 16);
         
-        // 写入索引表 (2 个条目，每个 24 字节)
-        // 条目1: name_hash=0x12345678, offset=0, size=50, flags=0, type=1(Texture)
+        // Write index table (2 entries, 24 bytes each)
+        // Entry 1: name_hash=0x12345678, offset=0, size=50, flags=0, type=1(Texture)
         uint32_t entry1[] = {0x12345678, 0, 50, 0, 1, 0};
         ofs.write(reinterpret_cast<char*>(entry1), 24);
         
-        // 条目2: name_hash=0x87654321, offset=50, size=50, flags=0, type=3(Shader)
+        // Entry 2: name_hash=0x87654321, offset=50, size=50, flags=0, type=3(Shader)
         uint32_t entry2[] = {0x87654321, 50, 50, 0, 3, 0};
         ofs.write(reinterpret_cast<char*>(entry2), 24);
         
-        // 写入数据区 (100 字节)
+        // Write data section (100 bytes)
         std::vector<char> data(100, 'A');
         for (int i = 0; i < 50; ++i) data[i] = 'T';  // Texture data
         for (int i = 50; i < 100; ++i) data[i] = 'S'; // Shader data
@@ -143,12 +143,12 @@ TEST_F(BinArchiveTest, FindEntry) {
     auto result = archive.load_from_file(test_bin_path_);
     ASSERT_TRUE(result) << tensyoki::to_string(result.error());
     
-    // 默认名称是哈希值
+    // Default name is the hash value
     const auto* entry = archive.find_entry("file_0000_12345678");
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->name_hash, 0x12345678);
     
-    // 不存在的资源
+    // Nonexistent resource
     EXPECT_EQ(archive.find_entry("nonexistent"), nullptr);
 }
 
@@ -165,7 +165,7 @@ TEST_F(BinArchiveTest, FindByHash) {
 }
 
 TEST_F(BinArchiveTest, InvalidMagic) {
-    // 创建无效魔数文件
+    // Create file with invalid magic
     auto bad_path = test_dir_ / "bad.bin";
     std::ofstream ofs(bad_path, std::ios::binary);
     uint32_t bad_magic = 0xDEADBEEF;
@@ -196,12 +196,12 @@ TEST_F(BinArchiveTest, LoadFromMemory) {
     auto result = archive.load_from_file(test_bin_path_);
     ASSERT_TRUE(result) << tensyoki::to_string(result.error());
     
-    // 使用 load_from_memory 重新解析
+    // Re-parse using load_from_memory
     BinArchive archive2;
     auto view_result = archive.view(archive.entries()[0]);
     ASSERT_TRUE(view_result);
     
-    // 读取整个文件到内存
+    // Read entire file into memory
     std::ifstream file(test_bin_path_, std::ios::binary);
     file.seekg(0, std::ios::end);
     size_t size = file.tellg();

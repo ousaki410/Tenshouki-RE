@@ -1,5 +1,5 @@
 /**
- * config.cpp - 配置管理实现
+ * config.cpp - configuration management implementation
  */
 
 #include "config.hpp"
@@ -14,7 +14,7 @@ namespace tensyoki {
 bool Config::load(const std::string& filename) {
     std::filesystem::path path = filename;
     if (!std::filesystem::exists(path)) {
-        // 创建默认配置
+        // Create default configuration
         set_defaults();
         return save(filename);
     }
@@ -151,7 +151,7 @@ void Config::save_table(toml::table& tbl) const {
 }
 
 void Config::set_defaults() {
-    // 窗口设置
+    // Window settings
     set("window.width", 1280);
     set("window.height", 720);
     set("window.title", "Tensyoki Linux Port");
@@ -159,27 +159,27 @@ void Config::set_defaults() {
     set("window.vsync", true);
     set("window.max_fps", 0);
     
-    // 路径
+    // Paths
     set("paths.data_root", std::filesystem::path{});
     set("paths.save_dir", std::filesystem::path{});
     
-    // 游戏
+    // Game
     set("game.language", "ja");
     set("game.difficulty", "normal");
     
-    // 音频
+    // Audio
     set("audio.master_volume", 1.0f);
     set("audio.music_volume", 1.0f);
     set("audio.sfx_volume", 1.0f);
     set("audio.enabled", true);
     
-    // 渲染
+    // Render
     set("renderer.backend", "opengl");
     set("renderer.msaa_samples", 0);
     set("renderer.debug_overlay", false);
     set("renderer.anisotropy", 16);
     
-    // 输入
+    // Input
     set("input.mouse_sensitivity", 1.0f);
     set("input.invert_mouse", false);
 }

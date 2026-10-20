@@ -1,5 +1,5 @@
 /**
- * math_utils.cpp - 数学工具实现
+ * math_utils.cpp - math utility implementation
  */
 
 #include "math_utils.hpp"

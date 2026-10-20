@@ -1,19 +1,19 @@
-关键人物记录数 0
+key person records 0
 
-== 人物ID字段候选(前8)
-tail +5 w=1 命中 0/0
-tail +4 w=2 命中 0/0
-tail +4 w=1 命中 0/0
-tail +3 w=2 命中 0/0
-tail +3 w=1 命中 0/0
-tail +2 w=2 命中 0/0
-tail +2 w=1 命中 0/0
-tail +1 w=2 命中 0/0
+== character ID field candidates (top 8)
+tail +5 w=1 matched 0/0
+tail +4 w=2 matched 0/0
+tail +4 w=1 matched 0/0
+tail +3 w=2 matched 0/0
+tail +3 w=1 matched 0/0
+tail +2 w=2 matched 0/0
+tail +2 w=1 matched 0/0
+tail +1 w=2 matched 0/0
 
-== 状态字节候选
+== status byte candidates
 
-== 各偏移跨剧本稳定比例(同名人物)
-同名跨剧本人数 492
+== per-offset stability across scenarios (same-name characters)
+characters with the same name across scenarios 492
 +0   0.10
 +1   0.57
 +2   0.17
@@ -62,15 +62,15 @@ tail +1 w=2 命中 0/0
 +45  0.44
 +46  0.47
 
-== 熟练值(+9,+11,+13 u16)范围
-最小 500 最大 1204 落在500-2000比例 1.0
+== proficiency values (+9,+11,+13 u16) range
+min 500 max 1204 share within 500-2000 1.0
 
-== +33 年龄推测:出生年+13+b33 的年份分布
-sn 1 中位 1534 最小 1506 最大 1610 人数 377
-sn 2 中位 1560 最小 1507 最大 1610 人数 509
-sn 3 中位 1571.0 最小 1507 最大 1610 人数 514
-sn 4 中位 1582.0 最小 1524 最大 1610 人数 508
-sn 5 中位 1546.0 最小 1507 最大 1610 人数 488
-sn 6 中位 1584 最小 1534 最大 1611 人数 479
+== +33 age estimate: distribution of birth year + 13 + b33
+sn 1 median 1534 min 1506 max 1610 count 377
+sn 2 median 1560 min 1507 max 1610 count 509
+sn 3 median 1571.0 min 1507 max 1610 count 514
+sn 4 median 1582.0 min 1524 max 1610 count 508
+sn 5 median 1546.0 min 1507 max 1610 count 488
+sn 6 median 1584 min 1534 max 1611 count 479
 
-已写出 out/all_attr.csv
+wrote out/all_attr.csv

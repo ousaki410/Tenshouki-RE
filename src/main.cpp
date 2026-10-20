@@ -1,5 +1,5 @@
 /**
- * main.cpp - 天翔记 Linux 移植版入口点
+ * main.cpp - Entry point for the Tensyoki Linux port
  */
 
 #include "core/config.hpp"
@@ -51,31 +51,31 @@ private:
     std::unique_ptr<Platform> platform_;
     std::unique_ptr<TextureAtlasViewer> atlas_viewer_;
     std::filesystem::path data_root_;
-    std::string imgui_ini_path_;  // ImGui ini 文件路径，需在 init() 期间保持有效
+    std::string imgui_ini_path_;  // ImGui ini file path; must stay valid during init()
     
     bool init() {
-        // 初始化日志
+        // Initialize logging
         Logging::init("tensyoki.log");
         LOG_INFO("=== Tensyoki Linux Port ===");
         LOG_INFO("Version: 0.1.0-dev");
         LOG_INFO("Build: {} {}", __DATE__, __TIME__);
         
-        // 加载配置
+        // Load configuration
         Config::instance().load("config.toml");
         
-        // 解析命令行参数获取数据路径
+        // Parse command-line arguments for the data path
         parse_args();
         
-        // 初始化 VFS
+        // Initialize VFS
         if (!VFS::instance().mount(data_root_, "/")) {
             LOG_ERROR("Failed to mount data root: {}", data_root_.string());
             return false;
         }
         
-        // 准备 ImGui ini 文件路径（需在 init() 期间保持有效）
+        // Prepare the ImGui ini file path (must stay valid during init())
         imgui_ini_path_ = (VFS::instance().get_user_data_dir() / "imgui.ini").string();
         
-        // 初始化平台抽象
+        // Initialize the platform abstraction
         platform_ = Platform::create();
         Platform::WindowParams window_params;
         window_params.title = Config::instance().get_window_title();
@@ -89,7 +89,7 @@ private:
             return false;
         }
         
-        // 初始化渲染器
+        // Initialize the renderer
         renderer_ = std::make_unique<Renderer>();
         Renderer::InitParams render_params;
         render_params.backend = Renderer::Backend::OpenGL;
@@ -104,7 +104,7 @@ private:
             return false;
         }
         
-        // 初始化 ImGui
+        // Initialize ImGui
         imgui_ = std::make_unique<ImGuiBackend>();
         ImGuiBackend::InitParams imgui_params;
         imgui_params.window_handle = platform_->get_window_handle();
@@ -118,10 +118,10 @@ private:
             return false;
         }
         
-        // 初始化纹理图集查看器
+        // Initialize the texture atlas viewer
         atlas_viewer_ = std::make_unique<TextureAtlasViewer>(*renderer_);
         
-        // 加载纹理图集
+        // Load the texture atlas
         auto atlas_path = data_root_ / "res" / "extracted_e1_t0_1024x1024_bgra.png";
         if (std::filesystem::exists(atlas_path)) {
             if (!atlas_viewer_->load_atlas(atlas_path, "res_grp.bin Entry 1 Texture 0")) {
@@ -131,11 +131,11 @@ private:
             LOG_WARN("Texture atlas not found: {}", atlas_path.string());
         }
         
-        // 设置中文字体
+        // Set up the Chinese font
         imgui_->load_font_default(18.0f);
         imgui_->set_style_dark();
         
-        // 测试资源解析
+        // Test resource parsing
         test_resource_parsing();
         
         LOG_INFO("Initialization complete");
@@ -143,7 +143,7 @@ private:
     }
     
     void parse_args() {
-        // 优先级: 命令行 > 环境变量 > 配置文件 > 自动检测
+        // Priority: command line > environment variables > config file > auto-detection
         if (argc_ > 1) {
             data_root_ = argv_[1];
         } else if (const char* env = std::getenv("TENSYOKI_DATA_ROOT")) {
@@ -153,7 +153,7 @@ private:
         }
         
         if (data_root_.empty()) {
-            // 自动检测常见路径
+            // Auto-detect common paths
             std::vector<std::filesystem::path> candidates = {
                 std::filesystem::current_path() / "data",
                 std::filesystem::current_path() / "NOBUNAGA'S AMBITION Tenshouki with Power Up Kit HD version",
@@ -177,7 +177,7 @@ private:
             LOG_ERROR("Game data not found. Please specify data root path.");
             LOG_ERROR("Usage: tensyoki [data_root_path]");
             LOG_ERROR("Or set TENSYOKI_DATA_ROOT environment variable");
-            data_root_ = ".";  // 允许继续运行以显示错误 UI
+            data_root_ = ".";  // Allow continuing so the error UI can be shown
         } else {
             LOG_INFO("Data root: {}", data_root_.string());
         }
@@ -186,7 +186,7 @@ private:
     void test_resource_parsing() {
         LOG_INFO("Testing resource parsing...");
         
-        // 测试解析 shader.bin
+        // Test parsing shader.bin
         BinArchive shader_archive;
         auto shader_result = shader_archive.load_from_file(data_root_ / "res" / "res_shader.bin");
         if (shader_result) {
@@ -197,7 +197,7 @@ private:
             LOG_WARN("Failed to parse res_shader.bin: {}", tensyoki::to_string(shader_result.error()));
         }
         
-        // 测试解析 else.bin
+        // Test parsing else.bin
         BinArchive else_archive;
         auto else_result = else_archive.load_from_file(data_root_ / "res" / "res_else.bin");
         if (else_result) {
@@ -206,7 +206,7 @@ private:
             LOG_WARN("Failed to parse res_else.bin: {}", tensyoki::to_string(else_result.error()));
         }
         
-        // 测试解析 grp.bin (大文件，可能只解析索引)
+        // Test parsing grp.bin (large file; may only parse the index)
         BinArchive grp_archive;
         auto grp_result = grp_archive.load_from_file(data_root_ / "res" / "res_grp.bin");
         if (grp_result) {
@@ -223,7 +223,7 @@ private:
         uint64_t frames_since_fps = 0;
         
         while (running) {
-            // 处理事件
+            // Process events
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 imgui_->process_event(&event);
@@ -247,17 +247,17 @@ private:
                 running = false;
             }
             
-            // 开始新帧
+            // Begin a new frame
             imgui_->new_frame(1.0f / 60.0f); // Fixed timestep for UI
             renderer_->begin_frame();
             
-            // 清屏
+            // Clear screen
             renderer_->clear(0.1f, 0.1f, 0.15f, 1.0f);
             
-            // 渲染 UI
+            // Render UI
             render_ui();
             
-            // 结束帧
+            // End the frame
             renderer_->end_frame();
             imgui_->render();
             platform_->swap_buffers();
@@ -265,7 +265,7 @@ private:
             frame_count++;
             frames_since_fps++;
             
-            // FPS 统计
+            // FPS statistics
             auto now = std::chrono::high_resolution_clock::now();
             float elapsed = std::chrono::duration<float>(now - last_fps_time).count();
             if (elapsed >= 1.0f) {
@@ -277,11 +277,11 @@ private:
     }
     
     void render_ui() {
-        // 主菜单演示
+        // Main menu demo
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("Open Data Root...")) {
-                    // TODO: 文件选择对话框
+                    // TODO: file selection dialog
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Quit", "Esc")) {
@@ -301,17 +301,17 @@ private:
             ImGui::EndMainMenuBar();
         }
         
-        // 纹理图集查看器
+        // Texture atlas viewer
         if (show_atlas_viewer_ && atlas_viewer_) {
             atlas_viewer_->draw();
         }
         
-        // 资源浏览器
+        // Resource browser
         if (show_resource_browser_) {
             render_resource_browser();
         }
         
-        // 状态栏
+        // Status bar
         ImGui::Begin("Status", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
         ImGui::SetWindowPos(ImVec2(0, ImGui::GetIO().DisplaySize.y - 25));
         ImGui::SetWindowSize(ImVec2(ImGui::GetIO().DisplaySize.x, 25));

@@ -1,5 +1,5 @@
 /**
- * grp_parser.cpp - 光荣 .bin 容器内部图像资源解析器实现
+ * grp_parser.cpp - Implementation of the image resource parser for files inside Koei .bin containers
  */
 
 #include "grp_parser.hpp"
@@ -10,7 +10,7 @@
 
 namespace tensyoki {
 
-// 小端读取工具
+// Little-endian read helpers
 uint32_t GrpParser::read_u32_le(std::span<const uint8_t> data, size_t offset) {
     if (offset + 4 > data.size()) return 0;
     return static_cast<uint32_t>(data[offset]) |
@@ -28,17 +28,17 @@ uint16_t GrpParser::read_u16_le(std::span<const uint8_t> data, size_t offset) {
 GrpImageFormat GrpParser::detect_format(std::span<const uint8_t> data) {
     if (data.size() < 4) return GrpImageFormat::Unknown;
     
-    // 检查常见魔数
+    // Check common magic numbers
     std::string_view magic(reinterpret_cast<const char*>(data.data()), 4);
     if (magic == "GRP " || magic == "IMG " || magic == "TEX " || magic == "SPR ") {
         if (data.size() >= sizeof(GrpFileHeader)) {
-            uint32_t fmt = read_u32_le(data, 16); // format 字段偏移
+            uint32_t fmt = read_u32_le(data, 16); // offset of the format field
             return static_cast<GrpImageFormat>(fmt);
         }
     }
     
-    // 尝试通过文件大小和内容推测
-    // TODO: 更智能的检测
+    // Try to infer from file size and content
+    // TODO: smarter detection
     return GrpImageFormat::Unknown;
 }
 
@@ -63,16 +63,16 @@ GrpResult<ImageData> GrpParser::parse(std::span<const uint8_t> data) const {
         return GrpResult<ImageData>::failure(GrpParseError::InvalidHeader);
     }
     
-    // 解析头部
+    // Parse header
     const GrpFileHeader* header = reinterpret_cast<const GrpFileHeader*>(data.data());
     
-    // 验证魔数
+    // Validate magic number
     std::string_view magic(header->magic, 4);
     if (magic != "GRP " && magic != "IMG " && magic != "TEX " && magic != "SPR ") {
         LOG_WARN("Unknown GRP magic: '{}', attempting parse anyway", magic);
     }
     
-    // 基本验证
+    // Basic validation
     if (header->width == 0 || header->height == 0 || 
         header->width > 8192 || header->height > 8192) {
         return GrpResult<ImageData>::failure(GrpParseError::InvalidDimensions);
@@ -82,7 +82,7 @@ GrpResult<ImageData> GrpParser::parse(std::span<const uint8_t> data) const {
     LOG_DEBUG("Parsing GRP: {}x{} fmt={} mips={}", 
               header->width, header->height, header->format, header->mip_count);
     
-    // 根据格式分发解析
+    // Dispatch parsing by format
     switch (static_cast<GrpImageFormat>(header->format)) {
         case GrpImageFormat::RGBA8888:
             return parse_rgba8888(data, *header);
@@ -142,7 +142,7 @@ GrpResult<ImageData> GrpParser::parse_rgb565(std::span<const uint8_t> data,
         return GrpResult<ImageData>::failure(GrpParseError::BufferTooSmall);
     }
     
-    // RGB565 转 RGBA8888
+    // Convert RGB565 to RGBA8888
     img.pixels.resize(header.width * header.height * 4);
     const uint16_t* src = reinterpret_cast<const uint16_t*>(data.data() + pixel_offset);
     uint8_t* dst = img.pixels.data();
@@ -155,7 +155,7 @@ GrpResult<ImageData> GrpParser::parse_rgb565(std::span<const uint8_t> data,
         uint8_t g = (pixel >> 5) & 0x3F;
         uint8_t b = pixel & 0x1F;
         
-        // 扩展到 8 位
+        // Expand to 8 bits
         *dst++ = (r << 3) | (r >> 2);
         *dst++ = (g << 2) | (g >> 4);
         *dst++ = (b << 3) | (b >> 2);
@@ -172,7 +172,7 @@ GrpResult<ImageData> GrpParser::parse_indexed8(std::span<const uint8_t> data,
     img.height = header.height;
     img.format = static_cast<uint32_t>(GrpImageFormat::Indexed8);
     
-    // 解析调色板
+    // Parse palette
     auto palette_result = parse_palette(data, header);
     if (!palette_result) return GrpResult<ImageData>::failure(palette_result.error());
     img.palette = std::move(*palette_result);
@@ -189,7 +189,7 @@ GrpResult<ImageData> GrpParser::parse_indexed8(std::span<const uint8_t> data,
                   std::span(data.data() + pixel_offset, expected_size),
                   img.pixels, header.width, header.height, false);
     
-    img.has_alpha = true; // 调色板可能包含透明度
+    img.has_alpha = true; // Palette may contain transparency
     return img;
 }
 
@@ -200,13 +200,13 @@ GrpResult<ImageData> GrpParser::parse_indexed4(std::span<const uint8_t> data,
     img.height = header.height;
     img.format = static_cast<uint32_t>(GrpImageFormat::Indexed4);
     
-    // 解析调色板 (16 色)
+    // Parse palette (16 colors)
     auto palette_result = parse_palette(data, header);
     if (!palette_result) return GrpResult<ImageData>::failure(palette_result.error());
     img.palette = std::move(*palette_result);
     
     size_t pixel_offset = header.pixel_offset ? header.pixel_offset : sizeof(GrpFileHeader);
-    size_t expected_size = (header.width * header.height + 1) / 2; // 4bpp = 2像素/字节
+    size_t expected_size = (header.width * header.height + 1) / 2; // 4bpp = 2 pixels/byte
     
     if (data.size() < pixel_offset + expected_size) {
         return GrpResult<ImageData>::failure(GrpParseError::BufferTooSmall);
@@ -224,8 +224,8 @@ GrpResult<ImageData> GrpParser::parse_indexed4(std::span<const uint8_t> data,
 GrpResult<ImageData> GrpParser::parse_dxt(std::span<const uint8_t> data, 
                                            const GrpFileHeader& header,
                                            GrpImageFormat format) const {
-    // DXT 解压需要外部库 (如 squish, stb_dxt) 或手写解压
-    // 这里返回原始数据供上层处理
+    // DXT decompression requires an external library (e.g. squish, stb_dxt) or a handwritten decoder
+    // Return the raw data here for the caller to handle
     ImageData img;
     img.width = header.width;
     img.height = header.height;
@@ -234,7 +234,7 @@ GrpResult<ImageData> GrpParser::parse_dxt(std::span<const uint8_t> data,
     
     size_t pixel_offset = header.pixel_offset ? header.pixel_offset : sizeof(GrpFileHeader);
     size_t expected_size = header.pixel_size ? header.pixel_size : 
-                           (header.width * header.height / 2); // DXT1 估算
+                           (header.width * header.height / 2); // DXT1 estimate
     
     if (data.size() < pixel_offset + expected_size) {
         return GrpResult<ImageData>::failure(GrpParseError::BufferTooSmall);
@@ -253,7 +253,7 @@ GrpResult<std::vector<uint8_t>> GrpParser::parse_palette(std::span<const uint8_t
     std::vector<uint8_t> palette;
     
     if (header.palette_offset == 0 || header.palette_size == 0) {
-        // 无调色板或使用默认调色板
+        // No palette, or use the default palette
         return GrpResult<std::vector<uint8_t>>::failure(GrpParseError::CorruptedPalette);
     }
     
@@ -261,7 +261,7 @@ GrpResult<std::vector<uint8_t>> GrpParser::parse_palette(std::span<const uint8_t
         return GrpResult<std::vector<uint8_t>>::failure(GrpParseError::CorruptedPalette);
     }
     
-    size_t entry_count = header.palette_size / 4; // 假设 RGBA 每项 4 字节
+    size_t entry_count = header.palette_size / 4; // assume 4 bytes per RGBA entry
     palette.resize(entry_count * 4);
     
     const uint8_t* src = data.data() + header.palette_offset;
@@ -280,7 +280,7 @@ void GrpParser::apply_palette(const std::vector<uint8_t>& palette,
     size_t palette_entries = palette.size() / 4;
     
     if (is_4bpp) {
-        // 4bpp: 每字节存 2 个像素 (高4位 + 低4位)
+        // 4bpp: 2 pixels per byte (high nibble + low nibble)
         for (size_t i = 0; i < src_indices.size(); ++i) {
             uint8_t byte = src_indices[i];
             uint8_t idx1 = (byte >> 4) & 0x0F;
@@ -296,7 +296,7 @@ void GrpParser::apply_palette(const std::vector<uint8_t>& palette,
             }
         }
     } else {
-        // 8bpp: 每字节存 1 个像素
+        // 8bpp: 1 pixel per byte
         for (size_t i = 0; i < src_indices.size(); ++i) {
             uint8_t idx = src_indices[i];
             size_t pal_idx = std::min<size_t>(idx, palette_entries - 1) * 4;
@@ -312,11 +312,11 @@ std::vector<std::pair<BinFileEntry, ImageData>> GrpParser::parse_all(const BinAr
     std::vector<std::pair<BinFileEntry, ImageData>> results;
     
     for (const auto& entry : archive.entries()) {
-        // 简单启发式：按扩展名或类型过滤疑似图像
+        // Simple heuristic: filter likely images by extension or type
         const char* ext = entry.guess_extension().c_str();
         if (strcmp(ext, ".tex") != 0 && strcmp(ext, ".spr") != 0 && 
             strcmp(ext, ".img") != 0 && entry.type != 1) {
-            continue; // 跳过明显非图像
+            continue; // skip obviously non-image entries
         }
         
         auto view_result = archive.view(entry);

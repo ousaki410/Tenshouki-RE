@@ -1,5 +1,5 @@
 /**
- * logging.hpp - 日志系统 (基于 spdlog)
+ * logging.hpp - logging system (spdlog-based)
  */
 
 #pragma once
@@ -23,12 +23,12 @@ public:
     
     static std::shared_ptr<spdlog::logger> get_logger(const std::string& name = "tensyoki");
     
-    // 设置日志级别
+    // Set log level
     static void set_console_level(spdlog::level::level_enum level);
     static void set_file_level(spdlog::level::level_enum level);
     static void set_pattern(const std::string& pattern);
     
-    // 刷新所有日志
+    // Flush all logs
     static void flush();
 
 private:
@@ -37,7 +37,7 @@ private:
     static std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file_sink_;
 };
 
-// 便利宏
+// Convenience macros
 #define LOG_TRACE(...) SPDLOG_LOGGER_TRACE(tensyoki::Logging::get_logger(), __VA_ARGS__)
 #define LOG_DEBUG(...) SPDLOG_LOGGER_DEBUG(tensyoki::Logging::get_logger(), __VA_ARGS__)
 #define LOG_INFO(...)  SPDLOG_LOGGER_INFO(tensyoki::Logging::get_logger(), __VA_ARGS__)
@@ -45,7 +45,7 @@ private:
 #define LOG_ERROR(...) SPDLOG_LOGGER_ERROR(tensyoki::Logging::get_logger(), __VA_ARGS__)
 #define LOG_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(tensyoki::Logging::get_logger(), __VA_ARGS__)
 
-// 条件日志
+// Conditional logging
 #define LOG_TRACE_IF(cond, ...) if (cond) LOG_TRACE(__VA_ARGS__)
 #define LOG_DEBUG_IF(cond, ...) if (cond) LOG_DEBUG(__VA_ARGS__)
 #define LOG_INFO_IF(cond, ...) if (cond) LOG_INFO(__VA_ARGS__)
