@@ -1,5 +1,5 @@
 /**
- * imgui_backend.cpp - Dear ImGui 后端实现
+ * imgui_backend.cpp - Dear ImGui backend implementation
  */
 
 #include "imgui_backend.hpp"
@@ -17,7 +17,7 @@ struct ImGuiBackend::Impl {
     bool initialized = false;
     bool use_vulkan = false;
     SDL_Window* window = nullptr;
-    std::string ini_filename;  // 存储 ini 文件名，保证生命周期
+    std::string ini_filename;  // Store the ini filename to keep it alive
 };
 
 ImGuiBackend::ImGuiBackend() : impl_(std::make_unique<Impl>()) {}
@@ -35,10 +35,10 @@ bool ImGuiBackend::init(const InitParams& params) {
         return false;
     }
     
-    // 保存 ini 文件名，确保生命周期覆盖整个 ImGui 上下文
+    // Save the ini filename so it outlives the entire ImGui context
     impl_->ini_filename = params.ini_filename ? params.ini_filename : "imgui.ini";
     
-    // 创建 ImGui 上下文
+    // Create the ImGui context
     impl_->ctx = ImGui::CreateContext();
     ImGui::SetCurrentContext(impl_->ctx);
     
@@ -58,24 +58,24 @@ bool ImGuiBackend::init(const InitParams& params) {
     io.IniFilename = impl_->ini_filename.c_str();
     io.FontGlobalScale = params.font_scale;
     
-    // 初始化 SDL3 后端
+    // Initialize the SDL3 backend
     if (!ImGui_ImplSDL3_InitForOpenGL(impl_->window, 
                                         SDL_GL_GetCurrentContext())) {
         LOG_ERROR("ImGui_ImplSDL3_InitForOpenGL failed");
         return false;
     }
     
-    // 初始化 OpenGL3 后端
+    // Initialize the OpenGL3 backend
     const char* glsl_version = "#version 450";
     if (!ImGui_ImplOpenGL3_Init(glsl_version)) {
         LOG_ERROR("ImGui_ImplOpenGL3_Init failed");
         return false;
     }
     
-    // 设置默认样式
+    // Set the default style
     set_style_dark();
     
-    // 加载默认字体
+    // Load the default font
     load_font_default(18.0f * params.font_scale);
     
     impl_->initialized = true;
@@ -138,7 +138,7 @@ ImFont* ImGuiBackend::load_font_default(float size) {
     (void)size;
     ImGui::SetCurrentContext(impl_->ctx);
     ImGuiIO& io = ImGui::GetIO();
-    // 使用默认字体
+    // Use the default font
     ImFont* font = io.Fonts->AddFontDefault();
     if (font) {
         font->Scale = 1.0f;
@@ -175,10 +175,10 @@ void ImGuiBackend::on_resize(int /*width*/, int /*height*/) {
     // ImGui handles resize automatically through SDL events
 }
 
-// ImGui 窗口辅助函数
+// ImGui window helpers
 namespace imgui_utils {
 
-// 帮助标记 (悬停显示提示)
+// Help marker (tooltip on hover)
 void help_marker(const char* desc) {
     ImGui::TextDisabled("(?)");
     if (ImGui::BeginItemTooltip()) {
@@ -189,18 +189,18 @@ void help_marker(const char* desc) {
     }
 }
 
-// 只读输入框
+// Read-only input field
 bool input_text_readonly(const char* label, const char* value) {
     ImGui::InputText(label, const_cast<char*>(value), strlen(value), ImGuiInputTextFlags_ReadOnly);
     return false;
 }
 
-// 颜色编辑器 (带 Alpha)
+// Color editor (with alpha)
 bool color_edit4(const char* label, float col[4], ImGuiColorEditFlags flags) {
     return ImGui::ColorEdit4(label, col, flags);
 }
 
-// 向量编辑器
+// Vector editor
 bool drag_float2(const char* label, float v[2], float speed, 
                  float min, float max, const char* format) {
     return ImGui::DragFloat2(label, v, speed, min, max, format);
@@ -216,7 +216,7 @@ bool drag_float4(const char* label, float v[4], float speed,
     return ImGui::DragFloat4(label, v, speed, min, max, format);
 }
 
-// 带标签的滑块
+// Slider with label
 bool slider_float(const char* label, float* v, float min, float max, 
                   const char* format, ImGuiSliderFlags flags) {
     return ImGui::SliderFloat(label, v, min, max, format, flags);
@@ -227,12 +227,12 @@ bool slider_int(const char* label, int* v, int min, int max,
     return ImGui::SliderInt(label, v, min, max, format, flags);
 }
 
-// 组合框 (字符串数组)
+// Combo box (array of strings)
 bool combo(const char* label, int* current, const char* const* items, int count) {
     return ImGui::Combo(label, current, items, count);
 }
 
-// 表格辅助
+// Table helpers
 void table_setup_column(const char* label, ImGuiTableColumnFlags flags, 
                         float init_width) {
     ImGui::TableSetupColumn(label, flags, init_width);
@@ -251,7 +251,7 @@ void table_set_column_index(int column) {
     ImGui::TableSetColumnIndex(column);
 }
 
-// 文件下拉
+// File dropdown
 void file_drop_target(const char* label, std::function<void(const std::string&)> callback) {
     (void)label;
     if (ImGui::BeginDragDropTarget()) {
@@ -263,13 +263,13 @@ void file_drop_target(const char* label, std::function<void(const std::string&)>
     }
 }
 
-// 进度条 (带文本)
+// Progress bar (with text)
 void progress_bar(float fraction, const ImVec2& size, 
                   const char* overlay) {
     ImGui::ProgressBar(fraction, size, overlay);
 }
 
-// 颜色按钮 (带拾取器)
+// Color button (with picker)
 bool color_button_with_picker(const char* label, float col[4], 
                               ImGuiColorEditFlags flags) {
     bool changed = ImGui::ColorButton(label, ImVec4(col[0], col[1], col[2], col[3]), flags);
@@ -283,7 +283,7 @@ bool color_button_with_picker(const char* label, float col[4],
     return changed;
 }
 
-// 标签页栏 (垂直)
+// Tab bar (vertical)
 bool begin_vertical_tab_bar(const char* str_id) {
     return ImGui::BeginTabBar(str_id, ImGuiTabBarFlags_NoTabListScrollingButtons | 
                               ImGuiTabBarFlags_FittingPolicyScroll);
@@ -302,7 +302,7 @@ bool vertical_tab_item(const char* label, bool* selected) {
     return result;
 }
 
-// 搜索框
+// Search box
 bool search_box(const char* label, char* buf, size_t buf_size) {
     return ImGui::InputTextWithHint(label, "Search...", buf, buf_size);
 }

@@ -1,7 +1,7 @@
 /**
- * dat_parser.hpp - 光荣游戏通用 .DAT 结构体数组数据解析器
+ * dat_parser.hpp - Generic Koei game .DAT struct-array data parser
  * 
- * 适用于武将、城池、道具等固定大小结构体数组的 DAT 文件。
+ * Suitable for DAT files containing fixed-size struct arrays such as officers, castles, and items.
  */
 
 #pragma once
@@ -18,7 +18,7 @@
 
 namespace tensyoki {
 
-/// DAT 解析错误类型 (复用或扩展 BinParseError)
+/// DAT parse error type (reuses or extends BinParseError)
 enum class DatParseError {
     FileNotFound,
     FileTooSmall,
@@ -44,28 +44,28 @@ constexpr std::string_view to_string(DatParseError err) noexcept {
 template<typename T>
 using DatResult = Result<T, DatParseError>;
 
-/// 示例武将记录结构体 (64 字节对齐)
+/// Example officer record struct (64-byte aligned)
 #pragma pack(push, 1)
 struct OfficerRecord {
-    uint16_t id;              // 武将内部 ID
-    uint16_t portrait_id;     // 头像 ID
-    uint8_t  status;          // 状态 (在野、仕官、死亡等)
-    uint8_t  loyalty;         // 忠诚度
-    uint8_t  leadership;      // 统率
-    uint8_t  warfare;         // 武力
-    uint8_t  wisdom;          // 智力
-    uint8_t  politics;        // 政治
-    uint8_t  ambition;        // 野心
-    uint8_t  charm;           // 魅力
-    char     name[20];        // 姓名 (固定长度，可能含 Shift-JIS 编码)
-    char     kana[20];        // 假名/字号
-    uint8_t  reserved[12];    // 保留字段以凑齐 64 字节
+    uint16_t id;              // Internal officer ID
+    uint16_t portrait_id;     // Portrait ID
+    uint8_t  status;          // Status (ronin, in service, dead, etc.)
+    uint8_t  loyalty;         // Loyalty
+    uint8_t  leadership;      // Leadership
+    uint8_t  warfare;         // Warfare
+    uint8_t  wisdom;          // Wisdom
+    uint8_t  politics;        // Politics
+    uint8_t  ambition;        // Ambition
+    uint8_t  charm;           // Charm
+    char     name[20];        // Name (fixed length, possibly Shift-JIS encoded)
+    char     kana[20];        // Kana / courtesy name
+    uint8_t  reserved[12];    // Reserved fields to pad to 64 bytes
 };
 #pragma pack(pop)
 
 static_assert(sizeof(OfficerRecord) == 64, "OfficerRecord size must be exactly 64 bytes");
 
-/// 通用 DAT 结构体数组容器解析器
+/// Generic DAT struct-array container parser
 template<typename RecordType>
 class DatArchive {
     static_assert(std::is_trivially_copyable_v<RecordType>, "RecordType must be trivially copyable");
@@ -80,7 +80,7 @@ public:
     DatArchive(DatArchive&&) = default;
     DatArchive& operator=(DatArchive&&) = default;
 
-    /// 从内存 Span 加载解析
+    /// Load and parse from a memory span
     DatResult<void> load_from_memory(std::span<const uint8_t> data) {
         clear();
 
@@ -103,7 +103,7 @@ public:
         size_t count = data.size() / record_size;
         raw_data_.assign(data.begin(), data.end());
         
-        // 建立记录视图
+        // Build the record view
         records_ = std::span<const RecordType>(
             reinterpret_cast<const RecordType*>(raw_data_.data()), 
             count
@@ -114,7 +114,7 @@ public:
         return DatResult<void>::success();
     }
 
-    /// 从 BinArchive 的特定条目加载
+    /// Load from a specific entry of a BinArchive
     DatResult<void> load_from_archive(const BinArchive& archive, const BinFileEntry& entry) {
         auto view_result = archive.view(entry);
         if (!view_result) {
@@ -124,16 +124,16 @@ public:
         return load_from_memory(*view_result);
     }
 
-    /// 获取全部记录的只读视图
+    /// Get a read-only view of all records
     std::span<const RecordType> records() const noexcept { return records_; }
 
-    /// 获取记录数量
+    /// Get the record count
     size_t count() const noexcept { return records_.size(); }
 
-    /// 是否已加载
+    /// Whether data is loaded
     bool is_loaded() const noexcept { return !records_.empty(); }
 
-    /// 根据索引获取记录
+    /// Get a record by index
     DatResult<const RecordType*> get(size_t index) const noexcept {
         if (index >= records_.size()) {
             LOG_ERROR("DAT record index out of range: {} >= {}", index, records_.size());
@@ -142,7 +142,7 @@ public:
         return DatResult<const RecordType*>::success(&records_[index]);
     }
 
-    /// 根据 ID 检索记录 (假设 RecordType 具有 id 字段)
+    /// Look up a record by ID (assumes RecordType has an id field)
     template<typename T = RecordType>
     auto find_by_id(uint16_t id) const -> std::optional<RecordType> requires requires(T t) { t.id; } {
         auto it = std::find_if(records_.begin(), records_.end(), [id](const RecordType& r) {
@@ -154,7 +154,7 @@ public:
         return std::nullopt;
     }
 
-    /// 清空数据
+    /// Clear data
     void clear() noexcept {
         raw_data_.clear();
         records_ = {};

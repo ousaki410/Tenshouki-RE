@@ -1,5 +1,5 @@
 /**
- * logging.cpp - 日志系统实现
+ * logging.cpp - logging system implementation
  */
 
 #include "logging.hpp"
@@ -14,12 +14,12 @@ std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> Logging::file_sink_;
 void Logging::init(const std::string& log_file, 
                    spdlog::level::level_enum console_level,
                    spdlog::level::level_enum file_level) {
-    // 创建控制台 sink
+    // Create console sink
     console_sink_ = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     console_sink_->set_level(console_level);
     console_sink_->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
     
-    // 创建文件 sink (轮转日志，最大 10MB，保留 5 个)
+    // Create file sink (rotating log, max 10MB, keep 5)
     std::string file_error;
     try {
         const auto parent = std::filesystem::path(log_file).parent_path();
@@ -31,18 +31,18 @@ void Logging::init(const std::string& log_file,
         file_sink_->set_level(file_level);
         file_sink_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%t] %v");
     } catch (const std::exception& e) {
-        // 文件创建失败时仅使用控制台
+        // Use console only if file creation fails
         file_sink_.reset();
         file_error = e.what();
     }
     
-    // 创建组合 logger
+    // Create combined logger
     std::vector<spdlog::sink_ptr> sinks = {console_sink_};
     if (file_sink_) sinks.push_back(file_sink_);
     
     logger_ = std::make_shared<spdlog::logger>("tensyoki", sinks.begin(), sinks.end());
-    logger_->set_level(spdlog::level::trace);  // 捕获所有级别，由 sink 过滤
-    logger_->flush_on(spdlog::level::warn);    // warn 及以上自动刷新
+    logger_->set_level(spdlog::level::trace);  // capture all levels; filtered by sinks
+    logger_->flush_on(spdlog::level::warn);    // auto-flush at warn and above
     
     spdlog::register_logger(logger_);
     spdlog::set_default_logger(logger_);
@@ -57,10 +57,10 @@ void Logging::init(const std::string& log_file,
 }
 
 void Logging::shutdown() {
-    if (!logger_) return;                      // 幂等
+    if (!logger_) return;                      // idempotent
     logger_->flush();
     
-    // 安全地替换默认 logger，避免重名
+    // Safely replace the default logger to avoid name conflicts
     auto fallback = spdlog::get("tensyoki_fallback");
     if (!fallback) {
         fallback = spdlog::stderr_color_mt("tensyoki_fallback");

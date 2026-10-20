@@ -1,5 +1,5 @@
 /**
- * config.hpp - 配置管理 (基于 TOML)
+ * config.hpp - configuration management (TOML-based)
  */
 
 #pragma once
@@ -17,7 +17,7 @@ namespace tensyoki {
 
 class Config {
 public:
-    // 获取单例
+    // Get singleton
     static Config& instance() {
         static Config instance;
         return instance;
@@ -26,13 +26,13 @@ public:
     Config(const Config&) = delete;
     Config& operator=(const Config&) = delete;
     
-    // 加载配置文件
+    // Load configuration file
     bool load(const std::string& filename = "config.toml");
     
-    // 保存配置文件
+    // Save configuration file
     bool save(const std::string& filename = "") const;
     
-    // 获取值 (支持类型转换)
+    // Get value (with type conversion support)
     template<typename T>
     T get(const std::string& key, const T& default_value = T{}) const {
         std::shared_lock lock(mutex_);
@@ -41,24 +41,24 @@ public:
             try {
                 return std::get<T>(it->second);
             } catch (const std::bad_variant_access&) {
-                // 类型不匹配，尝试转换
+                // Type mismatch, try conversion
                 return convert<T>(it->second);
             }
         }
         return default_value;
     }
     
-    // 重载：处理字符串字面量
+    // Overload: handles string literals
     std::string get(const std::string& key, const char* default_value) const {
         return get(key, std::string(default_value));
     }
     
-    // 重载：处理字符串字面量（非 const）
+    // Overload: handles string literals (non-const)
     std::string get(const std::string& key, std::string_view default_value) const {
         return get(key, std::string(default_value));
     }
     
-    // 设置值
+    // Set value
     template<typename T>
     void set(const std::string& key, const T& value) {
         std::unique_lock lock(mutex_);
@@ -66,34 +66,34 @@ public:
         dirty_ = true;
     }
     
-    // 重载：处理字符串字面量
+    // Overload: handles string literals
     void set(const std::string& key, const char* value) {
         std::unique_lock lock(mutex_);
         values_[key] = std::string(value);
         dirty_ = true;
     }
     
-    // 重载：处理 string_view
+    // Overload: handles string_view
     void set(const std::string& key, std::string_view value) {
         std::unique_lock lock(mutex_);
         values_[key] = std::string(value);
         dirty_ = true;
     }
     
-    // 检查键是否存在
+    // Check whether key exists
     bool has(const std::string& key) const {
         std::shared_lock lock(mutex_);
         return values_.contains(key);
     }
     
-    // 移除键
+    // Remove key
     void remove(const std::string& key) {
         std::unique_lock lock(mutex_);
         values_.erase(key);
         dirty_ = true;
     }
     
-    // 获取所有键
+    // Get all keys
     std::vector<std::string> keys() const {
         std::shared_lock lock(mutex_);
         std::vector<std::string> result;
@@ -102,7 +102,7 @@ public:
         return result;
     }
     
-    // 窗口设置快捷访问
+    // Window settings shortcuts
     int get_window_width() const { return get("window.width", 1280); }
     int get_window_height() const { return get("window.height", 720); }
     std::string get_window_title() const { return get("window.title", "Tensyoki Linux Port"); }
@@ -110,7 +110,7 @@ public:
     bool get_vsync() const { return get("window.vsync", true); }
     int get_max_fps() const { return get("window.max_fps", 0); }
     
-    // 数据路径
+    // Data path
     std::filesystem::path get_data_root() const { 
         return get("paths.data_root", std::filesystem::path{}); 
     }
@@ -118,20 +118,20 @@ public:
         set("paths.data_root", path); 
     }
     
-    // 语言设置
+    // Language settings
     std::string get_language() const { return get("game.language", "ja"); }
     
-    // 音频设置
+    // Audio settings
     float get_master_volume() const { return get("audio.master_volume", 1.0f); }
     float get_music_volume() const { return get("audio.music_volume", 1.0f); }
     float get_sfx_volume() const { return get("audio.sfx_volume", 1.0f); }
     
-    // 渲染设置
+    // Render settings
     std::string get_renderer_backend() const { return get("renderer.backend", "opengl"); }
     int get_msaa_samples() const { return get("renderer.msaa_samples", 0); }
     bool get_debug_overlay() const { return get("renderer.debug_overlay", false); }
     
-    // 导出为 TOML 字符串 (用于调试)
+    // Export as TOML string (for debugging)
     std::string to_toml_string() const;
 
 private:
@@ -147,10 +147,10 @@ private:
     mutable bool dirty_ = false;
     std::filesystem::path config_file_;
     
-    // 从 TOML 表递归加载
+    // Recursively load from TOML table
     void load_table(const toml::table& tbl, const std::string& prefix = "");
     
-    // 类型转换
+    // Type conversion
     template<typename T>
     T convert(const Value& v) const {
         if constexpr (std::is_same_v<T, bool>) {
@@ -181,10 +181,10 @@ private:
         return T{};
     }
     
-    // 保存到 TOML 表
+    // Save to TOML table
     void save_table(toml::table& tbl) const;
     
-    // 设置默认值
+    // Set default values
     void set_defaults();
 };
 

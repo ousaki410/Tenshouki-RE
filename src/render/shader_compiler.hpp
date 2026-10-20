@@ -1,7 +1,7 @@
 /**
- * shader_compiler.hpp - HLSL 到 SPIR-V/GLSL 编译器接口
- * 当前为无外部依赖的最小实现 (GLSL 透传 + SPIR-V 校验); 真正的 HLSL/GLSL -> SPIR-V
- * 编译需要接入 DXC 或 glslang 后端。
+ * shader_compiler.hpp - HLSL to SPIR-V/GLSL compiler interface
+ * Currently a minimal implementation with no external dependencies (GLSL passthrough + SPIR-V validation); real HLSL/GLSL -> SPIR-V
+ * compilation requires integrating a DXC or glslang backend.
  */
 
 #pragma once
@@ -53,17 +53,17 @@ public:
         SourceLanguage source_lang = SourceLanguage::HLSL;
         TargetLanguage target_lang = TargetLanguage::SPIRV;
 
-        // HLSL 特定
-        std::string hlsl_shader_model = "5_0";  // 目标 Shader Model
+        // HLSL-specific
+        std::string hlsl_shader_model = "5_0";  // Target Shader Model
         bool hlsl_enable_16bit_types = false;
-        std::vector<std::string> hlsl_defines;  // 预定义宏
+        std::vector<std::string> hlsl_defines;  // Predefined macros
         std::vector<std::filesystem::path> include_dirs;
 
-        // 优化
+        // Optimization
         bool optimize = true;
         bool debug_info = false;
 
-        // 资源绑定
+        // Resource bindings
         int base_vertex_binding = 0;
         int base_sampler_binding = 0;
         int base_texture_binding = 0;
@@ -73,14 +73,14 @@ public:
 
     struct CompileResult {
         bool success = false;
-        std::vector<uint32_t> spirv;           // SPIR-V 二进制
-        std::string glsl;                       // GLSL 源码
-        std::string msl;                        // MSL 源码
-        std::string wgsl;                       // WGSL 源码
-        std::string error_message;              // 错误信息
-        std::vector<std::string> warnings;      // 警告信息
+        std::vector<uint32_t> spirv;           // SPIR-V binary
+        std::string glsl;                       // GLSL source
+        std::string msl;                        // MSL source
+        std::string wgsl;                       // WGSL source
+        std::string error_message;              // Error message
+        std::vector<std::string> warnings;      // Warning messages
 
-        // 反射信息
+        // Reflection info
         struct ResourceBinding {
             std::string name;
             uint32_t set = 0;
@@ -110,57 +110,57 @@ public:
     ShaderCompiler();
     ~ShaderCompiler();
 
-    // 拥有 unique_ptr<Impl>, 仅支持移动
+    // Owns a unique_ptr<Impl>; move-only
     ShaderCompiler(const ShaderCompiler&) = delete;
     ShaderCompiler& operator=(const ShaderCompiler&) = delete;
     ShaderCompiler(ShaderCompiler&&) noexcept;
     ShaderCompiler& operator=(ShaderCompiler&&) noexcept;
 
-    // 编译源码字符串
+    // Compile a source string
     CompileResult compile(const std::string& source, const CompileOptions& options);
 
-    // 编译文件
+    // Compile a file
     CompileResult compile_file(const std::filesystem::path& file_path, const CompileOptions& options);
 
-    // 批量编译目录
+    // Batch-compile a directory
     bool compile_directory(const std::filesystem::path& src_dir,
                            const std::filesystem::path& dst_dir,
                            const CompileOptions& base_options);
 
-    // 从 res_shader.bin 提取并编译
+    // Extract from res_shader.bin and compile
     bool extract_and_compile_shaders(const std::filesystem::path& bin_path,
                                      const std::filesystem::path& output_dir);
 
-    // 获取支持的着色器模型列表
+    // Get the list of supported shader models
     static std::vector<std::string> get_supported_shader_models();
 
-    // 验证 SPIR-V
+    // Validate SPIR-V
     static bool validate_spirv(const std::vector<uint32_t>& spirv, std::string* error_out = nullptr);
 
-    // SPIR-V 反汇编 (用于调试)
+    // SPIR-V disassembly (for debugging)
     static std::string disassemble_spirv(const std::vector<uint32_t>& spirv);
 
 private:
-    struct Impl;  // 在 shader_compiler.cpp 中定义
+    struct Impl;  // defined in shader_compiler.cpp
     std::unique_ptr<Impl> impl_;
 
-    // HLSL 着色器模型版本映射, "5_0" -> 50, 非法输入返回 0
+    // HLSL shader model version mapping, "5_0" -> 50, returns 0 for invalid input
     static int hlsl_shader_model_to_version(const std::string& model);
 };
 
-// 便利函数
+// Convenience functions
 namespace shader_utils {
 
-// 从 D3D9 编译的 ps_2_0/vs_2_0 字节码提取信息
+// Extract info from D3D9-compiled ps_2_0/vs_2_0 bytecode
 struct LegacyShaderInfo {
-    std::string profile;           // "ps_2_0" 或 "vs_2_0"
-    std::vector<uint8_t> bytecode; // 原始字节码
-    std::string source_hint;       // 源文件路径提示 (如果有)
+    std::string profile;           // "ps_2_0" or "vs_2_0"
+    std::vector<uint8_t> bytecode; // Raw bytecode
+    std::string source_hint;       // Source file path hint (if any)
 };
 
 std::optional<LegacyShaderInfo> parse_legacy_shader_blob(const std::vector<uint8_t>& data);
 
-// 将 ps_2.0 语法转换为现代 HLSL (当前为透传, 尚未实现转换)
+// Convert ps_2.0 syntax to modern HLSL (currently passthrough; conversion not implemented)
 std::string convert_ps20_to_modern_hlsl(const std::string& ps20_source);
 
 } // namespace shader_utils

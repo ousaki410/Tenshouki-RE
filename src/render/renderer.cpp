@@ -1,5 +1,5 @@
 /**
- * renderer.cpp - OpenGL 4.5 渲染器实现 (最小可行实现)
+ * renderer.cpp - OpenGL 4.5 renderer implementation (minimal viable implementation)
  */
 
 #include "renderer.hpp"
@@ -169,7 +169,7 @@ bool Renderer::init(const InitParams& params) {
 }
 
 void Renderer::shutdown() {
-    // 重新创建空 Impl, 避免 shutdown 之后其他成员函数解引用空指针
+    // Recreate an empty Impl so other member functions do not dereference a null pointer after shutdown
     impl_ = std::make_unique<Impl>();
 }
 
@@ -229,7 +229,7 @@ std::shared_ptr<Renderer::Pipeline> Renderer::create_pipeline(const PipelineCrea
 }
 
 std::shared_ptr<Renderer::Shader> Renderer::create_shader(ShaderStage, const std::vector<uint32_t>&) {
-    // 最小实现: 需要 SPIR-V 到 GLSL 转换, 暂未实现
+    // Minimal implementation: requires SPIR-V to GLSL conversion, not yet implemented
     return nullptr;
 }
 
@@ -334,7 +334,7 @@ void Renderer::reset_stats() {
 }
 
 // === SpriteRenderer Implementation ===
-// 注意: SpriteRenderer 是 Renderer 的嵌套类, 必须使用完整限定名
+// Note: SpriteRenderer is a nested class of Renderer, so the fully qualified name is required
 struct Renderer::SpriteRenderer::Impl {
     static constexpr size_t kFloatsPerVertex = 8;
     static constexpr size_t kVerticesPerSprite = 6;

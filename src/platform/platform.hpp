@@ -1,6 +1,6 @@
 /**
- * platform.hpp - 平台抽象层
- * Linux/Windows/macOS 通用接口
+ * platform.hpp - platform abstraction layer
+ * Common interface for Linux/Windows/macOS
  */
 
 #pragma once
@@ -25,7 +25,7 @@ public:
         bool high_dpi = true;
         bool borderless = false;
         int msaa_samples = 0;
-        std::string icon_path;  // 窗口图标
+        std::string icon_path;  // window icon
     };
     
     struct DisplayMode {
@@ -37,20 +37,20 @@ public:
     
     virtual ~Platform() = default;
     
-    // 创建平台实例
+    // Create platform instance
     static std::unique_ptr<Platform> create();
     
-    // 初始化
+    // Initialize
     virtual bool init(const WindowParams& params) = 0;
     
-    // 关闭
+    // Shutdown
     virtual void shutdown() = 0;
     
-    // 主循环事件处理
+    // Main loop event handling
     virtual void poll_events() = 0;
     virtual void wait_events() = 0;
     
-    // 窗口管理
+    // Window management
     virtual void set_title(const std::string& title) = 0;
     virtual void set_size(int width, int height) = 0;
     virtual void get_size(int& width, int& height) const = 0;
@@ -67,15 +67,15 @@ public:
     virtual void set_position(int x, int y) = 0;
     virtual void get_position(int& x, int& y) const = 0;
     
-    // 显示模式
+    // Display modes
     virtual std::vector<DisplayMode> get_display_modes() const = 0;
     virtual DisplayMode get_current_display_mode() const = 0;
     
-    // 剪贴板
+    // Clipboard
     virtual void set_clipboard_text(const std::string& text) = 0;
     virtual std::string get_clipboard_text() = 0;
     
-    // 文件对话框
+    // File dialogs
     virtual std::optional<std::filesystem::path> open_file_dialog(
         const std::string& title,
         const std::filesystem::path& default_path = "",
@@ -93,7 +93,7 @@ public:
         const std::filesystem::path& default_path = ""
     ) = 0;
     
-    // 输入
+    // Input
     virtual bool is_key_pressed(int keycode) const = 0;
     virtual bool is_mouse_button_pressed(int button) const = 0;
     virtual void get_mouse_position(int& x, int& y) const = 0;
@@ -101,35 +101,35 @@ public:
     virtual void set_mouse_captured(bool captured) = 0;
     virtual bool is_mouse_captured() const = 0;
     virtual void set_cursor_visible(bool visible) = 0;
-    virtual void set_cursor_shape(int shape) = 0;  // 标准光标形状
+    virtual void set_cursor_shape(int shape) = 0;  // standard cursor shape
     
-    // 手柄
+    // Gamepad
     virtual int get_joystick_count() const = 0;
     virtual std::string get_joystick_name(int index) const = 0;
     virtual bool is_joystick_button_pressed(int joystick, int button) const = 0;
     virtual float get_joystick_axis(int joystick, int axis) const = 0;
     virtual bool is_joystick_connected(int index) const = 0;
     
-    // 系统
+    // System
     virtual void request_quit() = 0;
     virtual bool should_quit() const = 0;
-    virtual double get_time() const = 0;  // 秒，高精度
+    virtual double get_time() const = 0;  // seconds, high precision
     virtual void sleep(uint32_t ms) = 0;
     
-    // 原生句柄 (用于渲染器)
+    // Native handles (for renderer)
     virtual void* get_window_handle() const = 0;
     virtual void* get_display_handle() const = 0;
     
-    // 交换缓冲区
+    // Swap buffers
     virtual void swap_buffers() = 0;
     
-    // DPI 缩放
+    // DPI scaling
     virtual float get_dpi_scale() const = 0;
     virtual void set_dpi_aware(bool aware) = 0;
     
-    // 回调
+    // Callbacks
     using ResizeCallback = std::function<void(int width, int height)>;
-    using CloseCallback = std::function<bool()>;  // 返回 true 允许关闭
+    using CloseCallback = std::function<bool()>;  // return true to allow closing
     using KeyCallback = std::function<void(int key, int scancode, int action, int mods)>;
     using CharCallback = std::function<void(uint32_t codepoint)>;
     using MouseButtonCallback = std::function<void(int button, int action, int mods)>;
@@ -149,7 +149,7 @@ public:
     virtual void set_drop_callback(DropCallback cb) = 0;
 };
 
-// 键码定义 (SDL 兼容)
+// Key code definitions (SDL compatible)
 namespace Key {
     enum : int {
         Unknown = -1,
@@ -211,7 +211,7 @@ namespace Key {
     };
 }
 
-// 鼠标按钮
+// Mouse buttons
 namespace MouseButton {
     enum : int {
         Left = 0,
@@ -222,7 +222,7 @@ namespace MouseButton {
     };
 }
 
-// 光标形状
+// Cursor shapes
 namespace CursorShape {
     enum : int {
         Arrow = 0,
@@ -235,7 +235,7 @@ namespace CursorShape {
     };
 }
 
-// 手柄按钮 (Xbox 布局)
+// Gamepad buttons (Xbox layout)
 namespace GamepadButton {
     enum : int {
         A = 0, B, X, Y,
@@ -246,7 +246,7 @@ namespace GamepadButton {
     };
 }
 
-// 手柄轴
+// Gamepad axes
 namespace GamepadAxis {
     enum : int {
         LeftX = 0, LeftY,

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""verify_resources.py - Tenshouki 资源容器独立验证脚本
+"""verify_resources.py - standalone validator for Tenshouki resource containers
 
-独立于 C++ 解析器，按 bin_parser.hpp 中"假设"的 LINK 容器布局做结构校验，
-并在格式不符时输出可用于逆向的格式发现信息。只输出哈希/元数据，不输出游戏内容。
+Independent of the C++ parser. Performs structural validation against the LINK
+container layout "assumed" in bin_parser.hpp, and emits format-discovery
+information useful for reverse engineering when the format does not match.
+Only hashes and metadata are printed, never game content.
 
-用法:
+Usage:
   verify_resources.py DATA_DIR [--json report.json] [--manifest manifest.json]
                       [--update-manifest] [--strict]
-退出码: 0 全部通过 | 1 存在结构错误或哈希不匹配 | 2 存在未知格式(需要格式发现)
+Exit codes: 0 all checks passed | 1 structural error or hash mismatch | 2 unknown format (format discovery needed)
 """
 import argparse, hashlib, json, math, struct, sys
 from collections import Counter
@@ -46,11 +48,11 @@ def sniff(b):
     return "unknown"
 
 def discover(data, size):
-    """格式发现: 魔数不是 LINK 时，给出可用于推断布局的线索。"""
+    """Format discovery: when the magic is not LINK, return clues that can be used to infer the layout."""
     info = {"first_32_hex": data[:32].hex(), "head_entropy_4k": round(entropy(data[:4096]), 3)}
     u32 = [struct.unpack_from("<I", data, i)[0] for i in range(0, min(len(data), 64) - 3, 4)]
     info["first_u32_le"] = u32[:16]
-    # 假设: 开头是 count + 单调递增的偏移表
+    # assumption: the file starts with a count followed by a monotonically increasing offset table
     if len(u32) >= 4 and 0 < u32[0] < 1_000_000:
         n = u32[0]
         offs = u32[1:1 + min(n, 12)]
@@ -69,14 +71,14 @@ def verify_one(path, manifest=None, strict=False):
     if size < HEADER_SIZE:
         return {"file": str(path), "status": "FAIL", "errors": ["file too small for header"], "warnings": [], "hints": [], "sha256": sha256(path), "size": size}
 
-    # 解析头部
+    # parse the header
     magic, version, file_count, idx_off, idx_size, data_off, flags, *reserved = struct.unpack_from(HEADER_FMT, data)
 
-    # 版本号
+    # version number
     if not (VERSION_RANGE[0] <= version <= VERSION_RANGE[1]):
         errors.append(f"version {version} not in {VERSION_RANGE}")
 
-    # 索引表位置/大小
+    # index table position/size
     if idx_off < HEADER_SIZE:
         errors.append(f"index_offset {idx_off} < HEADER_SIZE {HEADER_SIZE}")
     if idx_off + idx_size > size:
@@ -84,13 +86,13 @@ def verify_one(path, manifest=None, strict=False):
     if idx_size != file_count * ENTRY_SIZE:
         errors.append(f"index_size {idx_size} != file_count {file_count} * {ENTRY_SIZE}")
 
-    # 数据区
+    # data region
     if data_off < idx_off + idx_size:
         errors.append(f"data_offset {data_off} < index_end {idx_off + idx_size}")
     if data_off > size:
         errors.append(f"data_offset {data_off} > file_size {size}")
 
-    # 解析索引表
+    # parse the index table
     entries = []
     if not errors:
         for i in range(file_count):
@@ -111,7 +113,7 @@ def verify_one(path, manifest=None, strict=False):
             if e_reserved != 0:
                 warnings.append(f"entry {i} reserved != 0 (0x{e_reserved:08X})")
 
-    # 重叠/哈希去重
+    # overlap / duplicate hash checks
     if not errors:
         intervals = [(e["offset"], e["offset"] + e["size"], e["index"]) for e in entries]
         intervals.sort()
@@ -123,7 +125,7 @@ def verify_one(path, manifest=None, strict=False):
             dup = [h for h in hashes if hashes.count(h) > 1]
             warnings.append(f"duplicate name_hash: {set(dup)}")
 
-    # 文件签名嗅探
+    # file signature sniffing
     type_dist = Counter()
     for e in entries[:200]:
         if e["size"] > 0:
@@ -132,17 +134,17 @@ def verify_one(path, manifest=None, strict=False):
             sig = "empty"
         type_dist[sig] += 1
 
-    # 数据区覆盖率
+    # data region coverage
     if entries:
         total_data = sum(e["size"] for e in entries)
         coverage = total_data / (size - data_off) if size > data_off else 0
     else:
         coverage = 0.0
 
-    # 计算 sha256（提前计算，供所有路径使用）
+    # compute sha256 (done up front so every path can use it)
     file_sha256 = sha256(path)
 
-    # 清单对比
+    # manifest comparison
     hash_ok = True
     if manifest and str(path) in manifest:
         m = manifest[str(path)]
@@ -178,17 +180,17 @@ def verify_one(path, manifest=None, strict=False):
     }
 
 def main():
-    ap = argparse.ArgumentParser(description="Tenshouki 资源容器验证")
-    ap.add_argument("data_dir", type=Path, help="data/res 目录")
-    ap.add_argument("--json", type=Path, help="输出 JSON 报告")
-    ap.add_argument("--manifest", type=Path, help="清单文件路径")
-    ap.add_argument("--update-manifest", action="store_true", help="更新/创建清单")
-    ap.add_argument("--strict", action="store_true", help="warnings 视为错误")
+    ap = argparse.ArgumentParser(description="Tenshouki resource container validation")
+    ap.add_argument("data_dir", type=Path, help="data/res directory")
+    ap.add_argument("--json", type=Path, help="write a JSON report")
+    ap.add_argument("--manifest", type=Path, help="manifest file path")
+    ap.add_argument("--update-manifest", action="store_true", help="update/create the manifest")
+    ap.add_argument("--strict", action="store_true", help="treat warnings as errors")
     args = ap.parse_args()
 
     data_dir = args.data_dir
     if not data_dir.exists():
-        print(f"目录不存在: {data_dir}")
+        print(f"Directory does not exist: {data_dir}")
         return 2
 
     manifest = {}
@@ -198,7 +200,7 @@ def main():
 
     bin_files = sorted(data_dir.glob("*.bin"))
     if not bin_files:
-        print("未找到 .bin 文件")
+        print("No .bin files found")
         return 2
 
     reports = []
@@ -230,12 +232,12 @@ def main():
         if args.manifest:
             with open(args.manifest, "w") as f:
                 json.dump(new_manifest, f, indent=2)
-            print(f"清单已更新: {args.manifest}")
+            print(f"Manifest updated: {args.manifest}")
 
     if args.json:
         with open(args.json, "w") as f:
             json.dump({"files": reports, "overall": overall_status}, f, indent=2)
-        print(f"JSON 报告: {args.json}")
+        print(f"JSON report: {args.json}")
 
     return overall_status
 

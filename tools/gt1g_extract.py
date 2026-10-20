@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""gt1g_extract.py - 严格 GT1G 0600 纹理提取器
+"""gt1g_extract.py - strict GT1G 0600 texture extractor
 
-用法:
+Usage:
   python3 tools/gt1g_extract.py <link_file> <entry_index> [texture_index]
   python3 tools/gt1g_extract.py <link_file> --list
   python3 tools/gt1g_extract.py <link_file> --extract-all
 
-只接受严格符合的 GT1G 0600 格式：
-- 顶层 LINK magic = "LINK"
-- 嵌套 entry 必须是 LINK magic
-- 嵌套 header: version=1, table_off=0x20, desc_off=0x40
-- 数据区 tag 必须为 "GT1G0600"
+Only strictly conforming GT1G 0600 data is accepted:
+- top-level LINK magic = "LINK"
+- nested entry must carry the LINK magic
+- nested header: version=1, table_off=0x20, desc_off=0x40
+- data-region tag must be "GT1G0600"
 - GT1G header: version=b"0600", field14=0, field18=0
-- Texture header: byte2 high nibble=log2(width), low nibble=log2(height)
-- 像素数据: 4 bytes/pixel (BGRA8888)
+- texture header: byte2 high nibble=log2(width), low nibble=log2(height)
+- pixel data: 4 bytes/pixel (BGRA8888)
 
-输出: 4 个 PNG (RGBA/BGRA × normal/flipped) 供目视比对
+Output: 4 PNGs (RGBA/BGRA x normal/flipped) for visual comparison
 """
 
 import struct
@@ -25,16 +25,16 @@ from pathlib import Path
 try:
     from PIL import Image
 except ImportError:
-    print("需要安装 Pillow: pip install Pillow")
+    print("Pillow is required: pip install Pillow")
     sys.exit(1)
 
 
 def parse_top_level_link(f):
-    """解析顶层 LINK 文件，返回所有 entry 的 (base, outer_size)"""
+    """Parse the top-level LINK file and return (base, outer_size) for every entry."""
     f.seek(0)
     magic = f.read(4)
     if magic != b'LINK':
-        raise ValueError("不是有效的 LINK 文件")
+        raise ValueError("not a valid LINK file")
     count = struct.unpack('<I', f.read(4))[0]
     
     entries = []
@@ -45,7 +45,7 @@ def parse_top_level_link(f):
 
 
 def read_entry_header(f, base):
-    """读取嵌套 entry 的 header (0x40 字节)"""
+    """Read the header of a nested entry (0x40 bytes)."""
     f.seek(base)
     hdr_data = f.read(0x40)
     if len(hdr_data) < 0x40 or hdr_data[:4] != b'LINK':
@@ -63,7 +63,7 @@ def read_entry_header(f, base):
 
 
 def read_gt1g_header(f, offset):
-    """读取 GT1G header (0x1C bytes)"""
+    """Read the GT1G header (0x1C bytes)."""
     f.seek(offset)
     hdr = f.read(0x1C)
     if len(hdr) < 0x1C:
@@ -82,7 +82,7 @@ def read_gt1g_header(f, offset):
 
 
 def parse_texture_header(f, start, header_size, count, total_size):
-    """解析每个纹理的头部信息"""
+    """Parse the per-texture header information."""
     f.seek(start + 0x1C)
     flags = struct.unpack('<%dI' % count, f.read(4 * count))
     f.seek(start + header_size)
@@ -123,7 +123,7 @@ def parse_texture_header(f, start, header_size, count, total_size):
 
 
 def extract_texture(f, start, texture, header_size):
-    """提取单个纹理的像素数据"""
+    """Extract the pixel data of a single texture."""
     expected = texture['width'] * texture['height'] * 4
     actual = texture['actual_span']
     
@@ -133,7 +133,7 @@ def extract_texture(f, start, texture, header_size):
     f.seek(start + header_size + texture['offset'])
     data = f.read(expected)
     if len(data) < expected:
-        # 如果不够，读实际 span
+        # fall back to the actual span if the read came up short
         f.seek(start + header_size + texture['offset'])
         data = f.read(actual)
     
@@ -141,10 +141,10 @@ def extract_texture(f, start, texture, header_size):
 
 
 def save_png_variants(data, width, height, out_prefix):
-    """保存 4 种变体: RGBA/BGRA × normal/flipped"""
+    """Save the 4 variants: RGBA/BGRA x normal/flipped."""
     variants = []
     
-    # 1. BGRA -> RGBA (标准)
+    # 1. BGRA -> RGBA (standard)
     img = Image.frombytes('RGBA', (width, height), data, 'raw', 'BGRA')
     img.save(f'{out_prefix}_bgra.png')
     variants.append(f'{out_prefix}_bgra.png')
@@ -155,7 +155,7 @@ def save_png_variants(data, width, height, out_prefix):
     img.save(f'{out_prefix}_bgra_flip.png')
     variants.append(f'{out_prefix}_bgra_flip.png')
     
-    # 3. RGBA 直写
+    # 3. RGBA written directly
     img = Image.frombytes('RGBA', (width, height), data, 'raw', 'RGBA')
     img.save(f'{out_prefix}_rgba.png')
     variants.append(f'{out_prefix}_rgba.png')
@@ -170,12 +170,12 @@ def save_png_variants(data, width, height, out_prefix):
 
 
 def extract_entry(file_path, base, outer_size, entry_idx, texture_idx=None):
-    """提取单个 entry 的纹理"""
+    """Extract the textures of a single entry."""
     with open(file_path, 'rb') as f:
         f.seek(base)
         hdr_data = f.read(0x40)
         if len(hdr_data) < 0x40 or hdr_data[:4] != b'LINK':
-            print(f'Entry {entry_idx}: 不是嵌套 LINK (magic mismatch)')
+            print(f'Entry {entry_idx}: not a nested LINK (magic mismatch)')
             return False
         
         ver, table_off, n, desc_off = struct.unpack_from('<4I', hdr_data, 4)
@@ -191,7 +191,7 @@ def extract_entry(file_path, base, outer_size, entry_idx, texture_idx=None):
         }
         
         if hdr['version'] != 1:
-            print(f'Entry {entry_idx}: 版本 {hdr["version"]} != 1, 跳过')
+            print(f'Entry {entry_idx}: version {hdr["version"]} != 1, skipping')
             return False
         if hdr['table_off'] != 0x20:
             print(f'Entry {entry_idx}: table_off=0x{hdr["table_off"]:x} != 0x20')
@@ -200,12 +200,12 @@ def extract_entry(file_path, base, outer_size, entry_idx, texture_idx=None):
             print(f'Entry {entry_idx}: desc_off=0x{hdr["desc_off"]:x} != 0x40')
             return False
         
-        # 查找 GT1G0600 标签
+        # locate the GT1G0600 tag
         f.seek(base)
         entry_data = f.read(outer_size)
         gt1g_offset = entry_data.find(b'GT1G0600')
         if gt1g_offset < 0:
-            print(f'Entry {entry_idx}: 未找到 GT1G0600 tag')
+            print(f'Entry {entry_idx}: GT1G0600 tag not found')
             return False
         
         gt1g_offset = base + gt1g_offset
@@ -215,41 +215,41 @@ def extract_entry(file_path, base, outer_size, entry_idx, texture_idx=None):
             print(f'Entry {entry_idx}: GT1G tag mismatch')
             return False
         
-        # 解析 GT1G header
+        # parse the GT1G header
         gt1g = read_gt1g_header(f, gt1g_offset)
         if gt1g is None:
-            print(f'Entry {entry_idx}: 无效 GT1G header')
+            print(f'Entry {entry_idx}: invalid GT1G header')
             return False
         
         if gt1g['count'] == 0 or gt1g['count'] > 64:
-            print(f'Entry {entry_idx}: 无效纹理数 {gt1g["count"]}')
+            print(f'Entry {entry_idx}: invalid texture count {gt1g["count"]}')
             return False
         
-        # 解析纹理头部
+        # parse the texture headers
         textures = parse_texture_header(f, gt1g_offset, gt1g['header_size'], gt1g['count'], gt1g['total'])
         
-        # 确定要提取的纹理
+        # select the textures to extract
         if texture_idx is not None:
             if texture_idx >= len(textures):
-                print(f'Texture index {texture_idx} 超出范围 (0-{len(textures)-1})')
+                print(f'Texture index {texture_idx} out of range (0-{len(textures)-1})')
                 return False
             textures = [textures[texture_idx]]
         
-        # 提取每个纹理
+        # extract each texture
         for tex in textures:
             if tex['actual_span'] != tex['expected_size']:
-                print(f"  Texture {tex['index']}: span=0x{tex['actual_span']:x} != expected 0x{tex['expected_size']:x} (可能不匹配)")
+                print(f"  Texture {tex['index']}: span=0x{tex['actual_span']:x} != expected 0x{tex['expected_size']:x} (possible mismatch)")
             
-            # 提取像素数据
+            # read the pixel data
             pixel_offset = gt1g_offset + gt1g['header_size'] + tex['offset']
             f.seek(pixel_offset)
             data = f.read(tex['expected_size'])
             if len(data) < tex['expected_size']:
-                # 如果不够，读实际 span
+                # fall back to the actual span if the read came up short
                 f.seek(pixel_offset)
                 data = f.read(tex['actual_span'])
             
-            # 保存 4 种变体
+            # save the 4 variants
             out_prefix = f'extracted_e{entry_idx}_t{tex["index"]}_{tex["width"]}x{tex["height"]}'
             variants = save_png_variants(data, tex['width'], tex['height'], out_prefix)
             print(f'Extracted: {out_prefix} ({tex["width"]}x{tex["height"]}) -> {variants}')
@@ -258,7 +258,7 @@ def extract_entry(file_path, base, outer_size, entry_idx, texture_idx=None):
 
 
 def list_entries(file_path):
-    """列出所有顶层 entry"""
+    """List all top-level entries."""
     with open(file_path, 'rb') as f:
         entries = parse_top_level_link(f)
     
@@ -284,7 +284,7 @@ def main():
     file_path = sys.argv[1]
     
     if not os.path.exists(file_path):
-        print(f'文件不存在: {file_path}')
+        print(f'File not found: {file_path}')
         return 1
     
     with open(file_path, 'rb') as f:
@@ -309,7 +309,7 @@ def main():
     texture_idx = int(sys.argv[3]) if len(sys.argv) > 3 else None
     
     if entry_idx >= len(entries):
-        print(f'Entry index {entry_idx} 超出范围 (0-{len(entries)-1})')
+        print(f'Entry index {entry_idx} out of range (0-{len(entries)-1})')
         return 1
     
     success = extract_entry(file_path, entries[entry_idx][0], entries[entry_idx][1], entry_idx, texture_idx)

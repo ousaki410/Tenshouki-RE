@@ -1,5 +1,5 @@
 /**
- * platform_linux.cpp - Linux 平台实现 (SDL3)
+ * platform_linux.cpp - Linux platform implementation (SDL3)
  */
 
 #include "platform.hpp"
@@ -18,13 +18,13 @@ public:
     ~LinuxPlatform() override { shutdown(); }
     
     bool init(const WindowParams& params) override {
-        // 初始化 SDL
+        // Initialize SDL
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS)) {
             LOG_ERROR("SDL_Init failed: {}", SDL_GetError());
             return false;
         }
         
-        // 设置 OpenGL 属性
+        // Set OpenGL attributes
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -37,16 +37,16 @@ public:
             SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, params.msaa_samples);
         }
         
-        // 启用 sRGB
+        // Enable sRGB
         SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
         
-        // 窗口标志
+        // Window flags
         Uint32 window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN;
         if (params.resizable) window_flags |= SDL_WINDOW_RESIZABLE;
         if (params.high_dpi) window_flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
         if (params.borderless) window_flags |= SDL_WINDOW_BORDERLESS;
         
-        // 创建窗口
+        // Create window
         window_ = SDL_CreateWindow(
             params.title.c_str(),
             params.width, params.height,
@@ -58,25 +58,25 @@ public:
             return false;
         }
         
-        // 创建 OpenGL 上下文
+        // Create OpenGL context
         gl_context_ = SDL_GL_CreateContext(window_);
         if (!gl_context_) {
             LOG_ERROR("SDL_GL_CreateContext failed: {}", SDL_GetError());
             return false;
         }
         
-        // 设置 VSync
+        // Set VSync
         SDL_GL_SetSwapInterval(params.vsync ? 1 : 0);
         
-        // 显示窗口
+        // Show window
         SDL_ShowWindow(window_);
         
-        // 设置图标
+        // Set icon
         if (!params.icon_path.empty()) {
             set_icon(params.icon_path);
         }
         
-        // 设置 DPI 感知
+        // Set DPI awareness
         SDL_SetAppMetadata("Tensyoki Linux Port", "0.1.0", "org.tensyoki.port");
         
         LOG_INFO("Linux platform initialized: {}x{}", params.width, params.height);
@@ -230,7 +230,7 @@ public:
         const std::vector<std::pair<std::string, std::string>>& filters
     ) override {
         (void)title; (void)default_path; (void)filters;
-        // TODO: 使用 zenity/kdialog 或 SDL3 的原生对话框 (如果可用)
+        // TODO: use zenity/kdialog or the native SDL3 dialog (if available)
         LOG_WARN("File dialog not implemented on Linux");
         return std::nullopt;
     }
@@ -407,7 +407,7 @@ public:
     }
     
     void set_dpi_aware(bool /*aware*/) override {
-        // SDL3 自动处理
+        // Handled automatically by SDL3
     }
     
     void set_resize_callback(ResizeCallback cb) override { resize_cb_ = std::move(cb); }
@@ -434,7 +434,7 @@ private:
                 
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 if (close_cb_ && !close_cb_()) {
-                    // 阻止关闭
+                    // Block close
                 } else {
                     should_quit_ = true;
                 }
@@ -447,7 +447,7 @@ private:
                 break;
                 
             case SDL_EVENT_TEXT_INPUT:
-                if (char_cb_) char_cb_(event.text.text[0]);  // 简化
+                if (char_cb_) char_cb_(event.text.text[0]);  // simplified
                 break;
                 
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -479,7 +479,7 @@ private:
                 break;
                 
             case SDL_EVENT_DROP_COMPLETE:
-                // 可以处理多文件拖放
+                // Multi-file drop could be handled here
                 break;
         }
     }

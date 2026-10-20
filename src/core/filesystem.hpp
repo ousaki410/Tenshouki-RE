@@ -1,6 +1,6 @@
 /**
- * filesystem.hpp - 虚拟文件系统 (VFS)
- * 支持挂载多个目录、.bin 容器透明读取、大小写不敏感路径
+ * filesystem.hpp - virtual file system (VFS)
+ * Supports mounting multiple directories, transparent .bin container reads, case-insensitive paths
  */
 
 #pragma once
@@ -32,7 +32,7 @@ public:
 
 class VFS {
 public:
-    // 获取单例
+    // Get singleton
     static VFS& instance() {
         static VFS instance;
         return instance;
@@ -41,42 +41,42 @@ public:
     VFS(const VFS&) = delete;
     VFS& operator=(const VFS&) = delete;
     
-    // 挂载目录到虚拟路径
-    // 例如: mount("/path/to/game/data", "/") 将游戏数据目录挂载为根目录
+    // Mount directory to virtual path
+    // For example: mount("/path/to/game/data", "/") mounts the game data directory as root
     bool mount(const std::filesystem::path& physical_path, const std::string& virtual_path = "/");
     
-    // 挂载 .bin 容器
+    // Mount .bin container
     bool mount_bin(const std::filesystem::path& bin_path, const std::string& virtual_path = "/");
     
-    // 卸载
+    // Unmount
     void unmount(const std::string& virtual_path);
     void unmount_all();
     
-    // 打开文件读取
+    // Open file for reading
     std::unique_ptr<FileHandle> open_read(const std::string& virtual_path);
     
-    // 打开文件写入 (仅限用户目录)
+    // Open file for writing (user directory only)
     std::unique_ptr<FileHandle> open_write(const std::string& virtual_path, bool append = false);
     
-    // 检查文件是否存在
+    // Check whether file exists
     bool exists(const std::string& virtual_path) const;
     
-    // 获取文件大小
+    // Get file size
     int64_t file_size(const std::string& virtual_path) const;
     
-    // 列出目录
+    // List directory
     std::vector<std::string> list_directory(const std::string& virtual_path) const;
     
-    // 解析虚拟路径到物理路径 (用于调试)
+    // Resolve virtual path to physical path (for debugging)
     std::optional<std::filesystem::path> resolve(const std::string& virtual_path) const;
     
-    // 设置大小写敏感性 (模拟 Windows 不敏感)
+    // Set case sensitivity (emulate Windows case-insensitivity)
     void set_case_sensitive(bool sensitive) { case_sensitive_ = sensitive; }
     
-    // 获取用户数据目录 (存档、配置、日志)
+    // Get user data directory (saves, config, logs)
     std::filesystem::path get_user_data_dir() const;
     
-    // 获取缓存目录
+    // Get cache directory
     std::filesystem::path get_cache_dir() const;
 
 private:
@@ -86,21 +86,21 @@ private:
         std::string virtual_path;
         std::filesystem::path physical_path;
         bool is_bin_container = false;
-        int priority = 0;  // 优先级，高优先级先搜索
+        int priority = 0;  // priority, higher priority searched first
     };
     
     mutable std::shared_mutex mounts_mutex_;
     std::vector<MountPoint> mounts_;
-    bool case_sensitive_ = false;  // 默认不敏感，模拟 Windows
+    bool case_sensitive_ = false;  // insensitive by default, emulating Windows
     
-    // 规范化路径 (统一分隔符、大小写)
+    // Normalize path (unify separators, case)
     std::string normalize_path(const std::string& path) const;
     
-    // 在挂载点中查找文件
+    // Find file among mount points
     std::optional<std::filesystem::path> find_file(const std::string& virtual_path) const;
 };
 
-// 便利函数
+// Convenience functions
 inline std::unique_ptr<FileHandle> vfs_open_read(const std::string& path) {
     return VFS::instance().open_read(path);
 }

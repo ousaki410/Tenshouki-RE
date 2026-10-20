@@ -1,10 +1,10 @@
 /**
- * bin_parser.hpp - 光荣游戏通用 .bin 容器解析器
+ * bin_parser.hpp - Generic Koei game .bin container parser
  * 
- * 文件格式:
+ * File format:
  * - Magic: "LINK" (4 bytes)
- * - Index Table: 子文件数量 + 每个条目(偏移量, 大小, 文件名哈希等)
- * - Data Blocks: 实际文件数据
+ * - Index Table: subfile count + one entry per file (offset, size, name hash, etc.)
+ * - Data Blocks: actual file data
  */
 
 #pragma once
@@ -24,23 +24,23 @@
 
 namespace tensyoki {
 
-// 前置声明
+// Forward declaration
 class BinArchive;
 
-/// .bin 容器中的单个文件条目
+/// A single file entry in a .bin container
 struct BinFileEntry {
-    std::string name;           // 文件名(如果可用)
-    uint32_t name_hash = 0;     // 文件名哈希
-    uint32_t offset = 0;        // 相对于数据区起始的偏移量
-    uint32_t size = 0;          // 文件大小(字节)
-    uint32_t flags = 0;         // 标志位(压缩、加密等)
-    uint32_t type = 0;          // 资源类型
+    std::string name;           // File name (if available)
+    uint32_t name_hash = 0;     // File name hash
+    uint32_t offset = 0;        // Offset relative to the start of the data area
+    uint32_t size = 0;          // File size (bytes)
+    uint32_t flags = 0;         // Flags (compression, encryption, etc.)
+    uint32_t type = 0;          // Resource type
     
-    /// 获取文件扩展名推测
+    /// Guess the file extension
     std::string guess_extension() const;
 };
 
-/// 解析错误类型
+/// Parse error type
 enum class BinParseError {
     FileNotFound,
     FileTooSmall,
@@ -52,7 +52,7 @@ enum class BinParseError {
     UnsupportedFormat
 };
 
-/// 错误信息转字符串
+/// Convert error to string
 constexpr std::string_view to_string(BinParseError err) noexcept {
     using E = BinParseError;
     switch (err) {
@@ -68,42 +68,42 @@ constexpr std::string_view to_string(BinParseError err) noexcept {
     return "Unknown error";
 }
 
-/// C++20 兼容的 Result 类型 (类似 std::expected)
-/// 使用 std::variant 处理 void 类型 (用 std::monostate 代替 void)
+/// C++20-compatible Result type (similar to std::expected)
+/// Uses std::variant to handle the void case (std::monostate in place of void)
 template<typename T, typename E>
 class Result {
 public:
-    // 禁止默认构造
+    // Disable default construction
     Result() = delete;
     
-    // 成功构造
+    // Success construction
     template<typename U = T>
     constexpr Result(U&& value) requires (!std::is_void_v<U>) 
         : storage_(std::in_place_index<0>, std::forward<U>(value)) {}
     
-    // 错误构造
+    // Error construction
     constexpr Result(E&& error) : storage_(std::in_place_index<1>, std::move(error)) {}
     constexpr Result(const E& error) : storage_(std::in_place_index<1>, error) {}
     
-    // void 类型的特化构造
+    // Specialized construction for the void type
     template<typename U = T>
     constexpr Result(std::nullptr_t) requires (std::is_void_v<U>) 
         : storage_(std::in_place_index<0>, std::monostate{}) {}
     
-    // 移动构造/赋值
+    // Move construction/assignment
     constexpr Result(Result&& other) noexcept = default;
     constexpr Result& operator=(Result&& other) noexcept = default;
     
-    // 禁止拷贝
+    // Disable copy
     Result(const Result&) = delete;
     Result& operator=(const Result&) = delete;
     
-    // 状态查询
+    // State queries
     constexpr explicit operator bool() const noexcept { return storage_.index() == 0; }
     constexpr bool has_value() const noexcept { return storage_.index() == 0; }
     constexpr bool has_error() const noexcept { return storage_.index() == 1; }
     
-    // 值访问
+    // Value access
     template<typename U = T>
     constexpr U& value() & requires (!std::is_void_v<U>) { 
         if (!has_value()) throw std::runtime_error("Result has no value"); 
@@ -120,7 +120,7 @@ public:
         return std::move(std::get<0>(storage_)); 
     }
     
-    // void 类型的 value()
+    // value() for the void type
     template<typename U = T>
     constexpr void value() requires (std::is_void_v<U>) { 
         if (!has_value()) throw std::runtime_error("Result has no value"); 
@@ -130,7 +130,7 @@ public:
         if (!has_value()) throw std::runtime_error("Result has no value"); 
     }
     
-    // 错误访问
+    // Error access
     constexpr E& error() & { 
         if (has_value()) throw std::runtime_error("Result has no error"); 
         return std::get<1>(storage_); 
@@ -140,7 +140,7 @@ public:
         return std::get<1>(storage_); 
     }
     
-    // 运算符重载 (仅非 void)
+    // Operator overloads (non-void only)
     template<typename U = T>
     constexpr U* operator->() & requires (!std::is_void_v<U>) { return has_value() ? &std::get<0>(storage_) : nullptr; }
     template<typename U = T>
@@ -151,7 +151,7 @@ public:
     template<typename U = T>
     constexpr const U& operator*() const& requires (!std::is_void_v<U>) { return value(); }
     
-    // 错误构造辅助
+    // Error construction helpers
     static constexpr Result success() requires (std::is_void_v<T>) { return Result(nullptr); }
     template<typename U = T>
     static constexpr Result success(U&& val) requires (!std::is_void_v<U>) { return Result(std::forward<U>(val)); }
@@ -163,50 +163,50 @@ private:
     std::variant<std::conditional_t<std::is_void_v<T>, std::monostate, T>, E> storage_;
 };
 
-/// 结果类型别名
+/// Result type alias
 template<typename T>
 using BinResult = Result<T, BinParseError>;
 
-/// .bin 容器主类
+/// Main .bin container class
 class BinArchive {
 public:
     BinArchive() = default;
     ~BinArchive() = default;
     
-    // 禁止拷贝(大数据)，允许移动
+    // Disable copy (large data), allow move
     BinArchive(const BinArchive&) = delete;
     BinArchive& operator=(const BinArchive&) = delete;
     BinArchive(BinArchive&&) = default;
     BinArchive& operator=(BinArchive&&) = default;
     
-    /// 从文件加载并解析
+    /// Load and parse from a file
     BinResult<void> load_from_file(const std::filesystem::path& path);
     
-    /// 从内存缓冲区加载
+    /// Load from a memory buffer
     BinResult<void> load_from_memory(std::span<const uint8_t> data);
     
-    /// 获取所有文件条目
+    /// Get all file entries
     const std::vector<BinFileEntry>& entries() const noexcept { return entries_; }
     
-    /// 根据名称查找条目
+    /// Find an entry by name
     const BinFileEntry* find_entry(std::string_view name) const noexcept;
     
-    /// 根据哈希查找条目
+    /// Find an entry by hash
     const BinFileEntry* find_entry_by_hash(uint32_t hash) const noexcept;
     
-    /// 提取文件数据到 vector
+    /// Extract file data into a vector
     BinResult<std::vector<uint8_t>> extract(const BinFileEntry& entry) const;
     
-    /// 提取文件数据到预分配缓冲区
+    /// Extract file data into a preallocated buffer
     BinResult<void> extract_to(const BinFileEntry& entry, std::vector<uint8_t>& out_buffer) const;
     
-    /// 获取文件数据的只读视图(零拷贝，需保证 archive 存活)
+    /// Get a read-only view of file data (zero-copy; archive must stay alive)
     BinResult<std::span<const uint8_t>> view(const BinFileEntry& entry) const;
     
-    /// 导出所有文件到目录
+    /// Export all files to a directory
     BinResult<void> extract_all(const std::filesystem::path& output_dir) const;
     
-    /// 获取容器信息摘要
+    /// Get a container information summary
     struct Info {
         std::string source_path;
         uint32_t version = 0;
@@ -217,29 +217,29 @@ public:
     };
     Info info() const noexcept;
     
-    /// 清理状态
+    /// Clear state
     void clear() noexcept;
 
-    // 公开头部结构供外部检查
+    // Public header structures for external inspection
     #pragma pack(push, 1)
     struct Header {
         char magic[4];           // "LINK"
-        uint32_t version;        // 版本号
-        uint32_t file_count;     // 文件数量
-        uint32_t index_offset;   // 索引表偏移(相对文件头)
-        uint32_t index_size;     // 索引表大小
-        uint32_t data_offset;    // 数据区偏移(相对文件头)
-        uint32_t flags;          // 容器标志
-        uint32_t reserved[4];    // 保留字段
+        uint32_t version;        // Version number
+        uint32_t file_count;     // File count
+        uint32_t index_offset;   // Index table offset (relative to file header)
+        uint32_t index_size;     // Index table size
+        uint32_t data_offset;    // Data area offset (relative to file header)
+        uint32_t flags;          // Container flags
+        uint32_t reserved[4];    // Reserved fields
     };
     
     struct IndexEntry {
-        uint32_t name_hash;      // 文件名哈希
-        uint32_t offset;         // 相对数据区偏移
-        uint32_t size;           // 文件大小
-        uint32_t flags;          // 标志位
-        uint32_t type;           // 资源类型
-        uint32_t reserved;       // 保留
+        uint32_t name_hash;      // File name hash
+        uint32_t offset;         // Offset relative to data area
+        uint32_t size;           // File size
+        uint32_t flags;          // Flags
+        uint32_t type;           // Resource type
+        uint32_t reserved;       // Reserved
     };
     #pragma pack(pop)
     
@@ -247,26 +247,26 @@ public:
     static constexpr uint32_t SUPPORTED_VERSION_MIN = 1;
     static constexpr uint32_t SUPPORTED_VERSION_MAX = 3;
     
-    // 内部解析方法
-    BinResult<void> parse_owned(std::vector<uint8_t>&& data);     // 接管所有权解析
-    BinResult<void> parse_from_span(std::span<const uint8_t> data); // 从 span 解析
+    // Internal parsing methods
+    BinResult<void> parse_owned(std::vector<uint8_t>&& data);     // Parse taking ownership
+    BinResult<void> parse_from_span(std::span<const uint8_t> data); // Parse from a span
     BinResult<void> parse_header(std::span<const uint8_t> data);
     BinResult<void> parse_index_table(std::span<const uint8_t> data);
     BinResult<void> validate_data_blocks() const;
     
-    // 工具方法
+    // Utility methods
     static uint32_t read_u32_le(std::span<const uint8_t> data, size_t offset);
     static void write_u32_le(std::vector<uint8_t>& data, size_t offset, uint32_t value);
 
 private:
     std::filesystem::path source_path_;
-    std::vector<uint8_t> file_data_;           // 完整文件内容(内存映射或读入)
-    std::vector<BinFileEntry> entries_;        // 解析出的文件列表
+    std::vector<uint8_t> file_data_;           // Complete file contents (memory-mapped or read in)
+    std::vector<BinFileEntry> entries_;        // Parsed file list
     Header header_{};
     bool loaded_ = false;
 };
 
-/// 便利函数：快速检查是否为有效 .bin 文件
+/// Convenience function: quickly check whether the file is a valid .bin file
 inline BinResult<bool> is_valid_bin_file(const std::filesystem::path& path) {
     if (!std::filesystem::exists(path)) {
         return BinResult<bool>::failure(BinParseError::FileNotFound);

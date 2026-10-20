@@ -1,6 +1,6 @@
 /**
- * renderer.hpp - 渲染器抽象层
- * 当前仅实现 OpenGL 后端 (Vulkan 为占位)
+ * renderer.hpp - Renderer abstraction layer
+ * Currently only the OpenGL backend is implemented (Vulkan is a placeholder)
  */
 
 #pragma once
@@ -114,7 +114,7 @@ public:
     };
 
     struct PipelineCreateInfo {
-        std::string vertex_shader;    // SPIR-V 路径或源码
+        std::string vertex_shader;    // SPIR-V path or source
         std::string fragment_shader;
         struct VertexLayout {
             struct Attribute {
@@ -140,7 +140,7 @@ public:
         } blend;
     };
 
-    // === 资源类型 (嵌套类) ===
+    // === Resource types (nested classes) ===
     class Texture {
     public:
         Texture() = default;
@@ -272,7 +272,7 @@ public:
         ~Pipeline() = default;
 
         bool create(const PipelineCreateInfo& info) {
-            // 最小实现: 仅保存配置, 着色器编译由 Shader 完成
+            // Minimal implementation: stores config only; shader compilation is handled by Shader
             info_ = info;
             return true;
         }
@@ -310,7 +310,7 @@ public:
         GLuint id_ = 0;
     };
 
-    // 2D 精灵渲染器
+    // 2D sprite renderer
     class SpriteRenderer {
     public:
         struct Sprite {
@@ -318,10 +318,10 @@ public:
             glm::vec2 size = {1, 1};
             glm::vec4 color = {1, 1, 1, 1};
             float rotation = 0;
-            glm::vec2 origin = {0.5f, 0.5f};  // 旋转中心
+            glm::vec2 origin = {0.5f, 0.5f};  // Rotation origin
             std::shared_ptr<Texture> texture;
-            glm::vec4 uv_rect = {0, 0, 1, 1};  // UV 裁剪
-            int layer = 0;  // 渲染层级
+            glm::vec4 uv_rect = {0, 0, 1, 1};  // UV clipping
+            int layer = 0;  // Render layer
         };
 
         explicit SpriteRenderer(Renderer& renderer);
@@ -336,7 +336,7 @@ public:
         void end();
         void flush();
 
-        // 设置默认纹理 (白色像素)
+        // Set the default texture (white pixel)
         void set_default_texture(std::shared_ptr<Texture> tex);
 
     private:
@@ -344,7 +344,7 @@ public:
         std::unique_ptr<Impl> impl_;
     };
 
-    // 文本渲染器
+    // Text renderer
     class TextRenderer {
     public:
         struct TextParams {
@@ -352,7 +352,7 @@ public:
             glm::vec2 position = {0, 0};
             float size = 24.0f;
             glm::vec4 color = {1, 1, 1, 1};
-            float wrap_width = 0;  // 0 = 不换行
+            float wrap_width = 0;  // 0 = no wrapping
             enum class Align { Left, Center, Right } align = Align::Left;
             float line_height = 1.2f;
             float letter_spacing = 0;
@@ -373,66 +373,66 @@ public:
         std::unique_ptr<Impl> impl_;
     };
 
-    // === Renderer 自身接口 (仅声明一次) ===
+    // === Renderer's own interface (declared only once) ===
     Renderer();
     ~Renderer();
 
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    // 初始化 / 关闭
+    // Initialize / shut down
     bool init(const InitParams& params);
     void shutdown();
 
-    // 调整大小
+    // Resize
     void on_resize(int width, int height);
 
-    // 帧开始/结束
+    // Begin/end frame
     void begin_frame();
     void end_frame();
 
-    // 视口/裁剪
+    // Viewport/clipping
     void set_viewport(const Viewport& vp);
     void set_scissor(int x, int y, int width, int height);
 
-    // 清屏
+    // Clear screen
     void clear(float r, float g, float b, float a, float depth = 1.0f, uint32_t stencil = 0);
 
-    // 资源创建
+    // Resource creation
     std::shared_ptr<Texture> create_texture(const TextureCreateInfo& info);
     std::shared_ptr<Buffer> create_buffer(const BufferCreateInfo& info);
     std::shared_ptr<Pipeline> create_pipeline(const PipelineCreateInfo& info);
     std::shared_ptr<Shader> create_shader(ShaderStage stage, const std::vector<uint32_t>& spirv);
 
-    // 绑定资源
+    // Bind resources
     void bind_pipeline(std::shared_ptr<Pipeline> pipeline);
     void bind_vertex_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset = 0);
     void bind_index_buffer(std::shared_ptr<Buffer> buffer, uint32_t offset = 0);
     void bind_texture(uint32_t slot, std::shared_ptr<Texture> texture);
     void bind_uniform_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset = 0, uint32_t size = 0);
 
-    // 绘制
+    // Draw
     void draw(const DrawCall& call);
     void draw_indexed(uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, int32_t vertex_offset = 0, uint32_t first_instance = 0);
     void draw_indirect(std::shared_ptr<Buffer> buffer, uint32_t offset = 0, uint32_t draw_count = 1, uint32_t stride = 0);
 
-    // 计算着色器
+    // Compute shader
     void dispatch_compute(uint32_t groups_x, uint32_t groups_y, uint32_t groups_z);
 
-    // 获取后端信息
+    // Get backend info
     Backend get_backend() const;
-    void* get_device() const;  // VkDevice 或 无 (OpenGL)
+    void* get_device() const;  // VkDevice, or none (OpenGL)
     std::string get_backend_name() const;
 
-    // 调试
+    // Debug
     void push_debug_group(const std::string& name);
     void pop_debug_group();
     void insert_debug_marker(const std::string& marker);
 
-    // 截图
+    // Screenshot
     bool capture_screenshot(const std::filesystem::path& path);
 
-    // 统计信息
+    // Statistics
     struct Stats {
         uint64_t draw_calls = 0;
         uint64_t triangles = 0;

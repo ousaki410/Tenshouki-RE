@@ -1,6 +1,6 @@
 /**
- * texture_atlas_viewer.hpp - 纹理图集预览工具 (ImGui)
- * 用于浏览提取的 GT1G 纹理图集，支持缩放、平移、UV 坐标显示
+ * texture_atlas_viewer.hpp - Texture atlas preview tool (ImGui)
+ * For browsing extracted GT1G texture atlases with zoom, pan, and UV coordinate display
  */
 
 #pragma once
@@ -30,14 +30,14 @@ class TextureAtlasViewer {
 public:
     TextureAtlasViewer(Renderer& renderer) : renderer_(renderer) {}
 
-    // 加载纹理图集
+    // Load texture atlas
     bool load_atlas(const std::filesystem::path& path, const std::string& name = "") {
         if (!std::filesystem::exists(path)) {
             LOG_ERROR("Texture file not found: {}", path.string());
             return false;
         }
 
-        // 使用 stb_image 加载
+        // Load with stb_image
         int w, h, channels;
         stbi_uc* pixels = stbi_load(path.string().c_str(), &w, &h, &channels, 4);
         if (!pixels) {
@@ -74,7 +74,7 @@ public:
         return true;
     }
 
-    // ImGui 绘制
+    // ImGui drawing
     void draw() {
         if (atlases_.empty()) {
             ImGui::Text("No atlas loaded. Use load_atlas() first.");
@@ -87,7 +87,7 @@ public:
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("Load Atlas...")) {
-                    // TODO: 文件对话框
+                    // TODO: file dialog
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Close")) {
@@ -126,13 +126,13 @@ public:
 
         ImGui::Separator();
 
-        // 信息栏
+        // Info bar
         ImGui::Text("Atlas: %s (%ux%u)", atlas.name.c_str(), atlas.width, atlas.height);
         ImGui::SameLine();
         ImGui::Text("Path: %s", atlas.file_path.string().c_str());
         ImGui::Separator();
 
-        // 控制面板
+        // Control panel
         ImGui::BeginChild("Controls", ImVec2(0, 100), true);
         ImGui::DragFloat("Zoom", &zoom_, 0.01f, 0.1f, 10.0f, "%.2fx");
         ImGui::SameLine();
@@ -147,14 +147,14 @@ public:
         }
         ImGui::EndChild();
 
-        // 图像显示区域
+        // Image display area
         ImGui::Separator();
         ImGui::BeginChild("ImageView", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
 
         auto tex_id = static_cast<ImTextureID>(atlas.texture->get_id());
         ImVec2 img_size(static_cast<float>(atlas.width) * zoom_, static_cast<float>(atlas.height) * zoom_);
 
-        // 计算居中偏移
+        // Compute centering offset
         ImVec2 avail = ImGui::GetContentRegionAvail();
         ImVec2 offset((avail.x - img_size.x) * 0.5f, (avail.y - img_size.y) * 0.5f);
         if (offset.x < 0) offset.x = 0;
@@ -164,15 +164,15 @@ public:
         ImVec2 img_min = ImVec2(cursor_pos.x + offset.x, cursor_pos.y + offset.y);
         ImVec2 img_max = ImVec2(img_min.x + img_size.x, img_min.y + img_size.y);
 
-        // 绘制图像
+        // Draw the image
         ImGui::GetWindowDrawList()->AddImage(tex_id, img_min, img_max, ImVec2(0, 0), ImVec2(1, 1));
 
-        // UV 网格
+        // UV grid
         if (show_uv_grid_) {
             draw_uv_grid(img_min, img_max, atlas.width, atlas.height);
         }
 
-        // 像素信息
+        // Pixel info
         if (show_pixel_info_) {
             ImVec2 mouse_pos = ImGui::GetMousePos();
             if (mouse_pos.x >= img_min.x && mouse_pos.x < img_max.x &&
@@ -196,7 +196,7 @@ public:
 private:
     void draw_uv_grid(ImVec2 img_min, ImVec2 img_max, uint32_t width, uint32_t height) {
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
-        const uint32_t grid_step = 64; // UV 网格步长 (像素)
+        const uint32_t grid_step = 64; // UV grid step (pixels)
 
         ImU32 grid_color = IM_COL32(255, 255, 255, 50);
         ImU32 text_color = IM_COL32(255, 255, 255, 180);
@@ -204,7 +204,7 @@ private:
         float img_w = static_cast<float>(atlases_.empty() ? 1 : atlases_[current_atlas_].width);
         float img_h = static_cast<float>(atlases_.empty() ? 1 : atlases_[current_atlas_].height);
 
-        // 垂直线
+        // Vertical lines
         for (uint32_t x = 0; x <= width; x += 64) {
             float u = static_cast<float>(x) / img_w;
             float x_pos = img_min.x + u * (img_max.x - img_min.x);
@@ -214,7 +214,7 @@ private:
             draw_list->AddText(ImVec2(x_pos + 2, img_min.y + 2), IM_COL32(255, 255, 255, 180), buf);
         }
 
-        // 水平线
+        // Horizontal lines
         for (uint32_t y = 0; y <= height; y += 64) {
             float v = static_cast<float>(y) / img_h;
             float y_pos = img_min.y + v * (img_max.y - img_min.y);
@@ -231,7 +231,7 @@ private:
         ImVec2 avail = ImGui::GetContentRegionAvail();
         float zoom_x = avail.x / static_cast<float>(atlas.width);
         float zoom_y = avail.y / static_cast<float>(atlas.height);
-        zoom_ = std::min(zoom_x, zoom_y) * 0.95f; // 留 5% 边距
+        zoom_ = std::min(zoom_x, zoom_y) * 0.95f; // leave 5% margin
     }
 
     Renderer& renderer_;
