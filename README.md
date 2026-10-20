@@ -1,27 +1,46 @@
-# Tensyoki Linux Port
+# Tensyoki — Linux Port
 
-《天翔记 HD》 (信长之野望・天道) Linux 原生移植项目。
+A native Linux port of *Nobunaga's Ambition: Tenshouki* (信長の野望・天翔記) HD Edition.
 
-## 状态
+## Status
 
-**Phase 1 (架构骨架) - 完成** ✅
-- 核心模块：配置、日志、VFS、数学工具
-- 平台层：SDL3 + OpenGL 4.5 窗口/输入/剪贴板
-- 资源解析：`.bin` 容器 (BinArchive)、`.grp` 图像、`.dat` 结构化数据
-- 渲染抽象：OpenGL 后端、Sprite/Text 渲染器框架
-- 调试 UI：ImGui 资源浏览器、十六进制查看器
+**Phase 1 (architecture skeleton) — complete** ✅
+- Core modules: configuration, logging, VFS, math utilities
+- Platform layer: SDL3 + OpenGL 4.5 window/input/clipboard
+- Resource parsers: `.bin` containers (`BinArchive`), `.grp` images, `.dat` structured data
+- Rendering abstraction: OpenGL backend, sprite/text renderer framework
+- Debug UI: ImGui resource browser, hex viewer
 
-**Phase 2 (绿色构建/基础验证) - 进行中** 🔧
-- 修复构建系统、API 漂移、所有权问题
+**Phase 2 (clean build / baseline validation) — in progress** 🔧
+- Fixing the build system, API drift, and ownership issues
 
-## 构建要求
+## Game files
+
+**This repository does not contain the game.** All game assets are excluded because individual files exceed GitHub's 100 MB per-file limit.
+
+To run the port you need your own legally obtained copy of the game. Place it in the repository root using the original directory name:
+
+```
+NOBUNAGA'S AMBITION Tenshouki with Power Up Kit HD version/
+├── res/
+│   ├── res_grp.bin
+│   ├── res_shader.bin
+│   └── res_else.bin
+├── MSG/
+├── scenario/
+└── ...
+```
+
+The path can also be supplied on the command line or via an environment variable (see [Running](#running)).
+
+## Build requirements
 
 - CMake 3.20+
-- C++20 编译器 (GCC 11+, Clang 13+, MSVC 19.30+)
-- SDL3 开发库
-- spdlog, fmt, glm (通过 CMake FetchContent 自动获取)
-- DirectX Shader Compiler (DXC) - 用于 HLSL→SPIR-V
-- OpenGL 4.5+ / Vulkan 1.2+ 驱动
+- A C++20 compiler (GCC 11+, Clang 13+, MSVC 19.30+)
+- SDL3 development libraries
+- spdlog, fmt, glm (fetched automatically via CMake `FetchContent`)
+- DirectX Shader Compiler (DXC) — for HLSL → SPIR-V
+- An OpenGL 4.5+ / Vulkan 1.2+ driver
 
 ### Ubuntu/Debian
 ```bash
@@ -33,81 +52,93 @@ sudo apt install cmake g++ libsdl3-dev libvulkan-dev
 sudo pacman -S cmake gcc sdl3 vulkan-headers vulkan-icd-loader
 ```
 
-## 构建
+## Building
 
 ```bash
-# 配置
+# Configure
 cmake -S . -B build -G Ninja
 
-# 编译
+# Compile
 cmake --build build
 
-# 运行测试
+# Run tests
 ctest --test-dir build --output-on-failure
 ```
 
-## 运行
+> **Note on the committed `build/` directory**
+> The repository includes a snapshot of the build tree for reference. It contains absolute paths from the
+> original machine, so it cannot be reused directly — run the configuration step above to generate a
+> working build. Vendored dependency sources under `build/_deps/*-src/` are git-ignored and are
+> re-fetched by `FetchContent`.
+
+## Running
 
 ```bash
-# 指定游戏数据目录
-./build/tensyoki /path/to/NOBUNAGA'S AMBITION Tenshouki with Power Up Kit HD version
+# Pass the game data directory explicitly
+./build/tensyoki "/path/to/NOBUNAGA'S AMBITION Tenshouki with Power Up Kit HD version"
 
-# 或设置环境变量
+# Or set an environment variable
 export TENSYOKI_DATA_ROOT=/path/to/game/data
 ./build/tensyoki
 ```
 
-## 项目结构
+## Project layout
 
 ```
 src/
-├── app/              # 应用入口 (未来)
-├── core/             # 核心工具
-│   ├── config.hpp/cpp      # TOML 配置管理
-│   ├── filesystem.hpp/cpp  # VFS 虚拟文件系统
-│   ├── logging.hpp/cpp     # spdlog 日志封装
-│   └── math_utils.hpp/cpp  # 数学工具
-├── platform/         # 平台抽象
-│   ├── platform.hpp        # 接口定义
-│   └── platform_linux.cpp  # SDL3 Linux 实现
-├── render/           # 渲染抽象
-│   ├── renderer.hpp/cpp    # 渲染器核心 (OpenGL/Vulkan)
-│   └── shader_compiler.hpp/cpp  # DXC HLSL→SPIR-V
-├── resource/         # 资源解析
-│   ├── bin_parser.hpp/cpp  # .bin 容器 (LINK 魔数)
-│   ├── grp_parser.hpp/cpp  # 图像解码
-│   └── dat_parser.hpp/cpp  # 结构化数组 (武将/城池)
-├── ui/               # 调试 UI
-│   └── imgui_backend.hpp/cpp  # ImGui SDL3+OpenGL 后端
-└── test/             # 单元测试
+├── app/              # Application entry point (planned)
+├── core/             # Core utilities
+│   ├── config.hpp/cpp      # TOML configuration
+│   ├── filesystem.hpp/cpp  # Virtual file system
+│   ├── logging.hpp/cpp     # spdlog wrapper
+│   └── math_utils.hpp/cpp  # Math helpers
+├── platform/         # Platform abstraction
+│   ├── platform.hpp        # Interface
+│   └── platform_linux.cpp  # SDL3 Linux implementation
+├── render/           # Rendering abstraction
+│   ├── renderer.hpp/cpp    # Renderer core (OpenGL/Vulkan)
+│   └── shader_compiler.hpp/cpp  # DXC HLSL → SPIR-V
+├── resource/         # Resource parsers
+│   ├── bin_parser.hpp/cpp  # .bin containers (LINK magic)
+│   ├── grp_parser.hpp/cpp  # Image decoding
+│   └── dat_parser.hpp/cpp  # Structured arrays (officers/castles)
+├── ui/               # Debug UI
+│   └── imgui_backend.hpp/cpp  # ImGui SDL3 + OpenGL backend
+└── test/             # Unit tests
 ```
 
-## 调试 UI
+Other directories:
 
-- **F1** - 显示/隐藏资源浏览器
-- **Esc** - 退出程序
-- **F11** - 切换全屏
+- `docs/` — reverse-engineering notes and file format documentation
+- `tools/` — standalone Python scripts for inspecting and extracting game data
+- `out/` — analysis results (officer attributes, `sndata` JSON dumps, reports)
 
-资源浏览器功能：
-- 选择 `.bin` 容器 (res_shader.bin, res_else.bin, res_grp.bin 等)
-- 过滤、树状列表显示条目
-- 查看元数据 (偏移、大小、类型、哈希)
-- 十六进制转储 (前 256 字节/全部)
-- 提取单个/全部资源到 `extracted/` 目录
+## Debug UI
 
-## 许可证
+- **F1** — show/hide the resource browser
+- **Esc** — quit
+- **F11** — toggle fullscreen
 
-MIT License - 详见 [LICENSE](LICENSE)
+Resource browser features:
+- Select a `.bin` container (`res_shader.bin`, `res_else.bin`, `res_grp.bin`, …)
+- Filter and browse entries as a tree
+- Inspect metadata (offset, size, type, hash)
+- Hex dump (first 256 bytes / full entry)
+- Extract a single entry or all entries to the `extracted/` directory
 
-## 致谢
+## License
 
-- [SDL3](https://github.com/libsdl-org/SDL) - 跨平台窗口/输入
-- [Dear ImGui](https://github.com/ocornut/imgui) - 即时模式 GUI
-- [spdlog](https://github.com/gabime/spdlog) - 高性能日志
-- [fmt](https://github.com/fmtlib/fmt) - 格式化库
-- [GLM](https://github.com/g-truc/glm) - 数学库
-- [DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler) - HLSL 编译器
+MIT License — see [LICENSE](LICENSE).
+
+## Acknowledgements
+
+- [SDL3](https://github.com/libsdl-org/SDL) — cross-platform windowing and input
+- [Dear ImGui](https://github.com/ocornut/imgui) — immediate-mode GUI
+- [spdlog](https://github.com/gabime/spdlog) — fast logging
+- [fmt](https://github.com/fmtlib/fmt) — formatting library
+- [GLM](https://github.com/g-truc/glm) — math library
+- [DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler) — HLSL compiler
 
 ---
 
-*本项目仅供学习和研究使用，不包含任何游戏原版资源文件。*
+*This project is intended for learning and research only. It does not include any original game assets.*
