@@ -1,24 +1,22 @@
-# Build directories
-build/
-build_*/
-*.o
-*.obj
-*.exe
-*.pdb
-*.dll
-*.so
-*.dylib
+# Vendored dependency checkouts (upstream git repos, fetched by CMake FetchContent)
+build/_deps/*-src/
 
 # Logs
+*.log
 tensyoki.log
 test.log
 
 # Extracted resources
 extracted/
 
-# Game assets (too large for git)
+# Game assets (exceed GitHub's 100 MB per-file limit)
 NATWPUKHDV-ALI213.rar
+NOBUNAGA'S AMBITION*/
 tensyoki_extracted/
+data/
+
+# Local helpers
+pathlib
 
 # IDE
 .vscode/
@@ -26,13 +24,6 @@ tensyoki_extracted/
 *.swp
 *.swo
 *~
-
-# CMake
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-*.ninja
 
 # Testing
 *.gcda
@@ -42,3 +33,4 @@ coverage/
 
 # Sanitizers
 asan_log.txt
+asan.log
