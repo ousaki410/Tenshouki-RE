@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/ou/Projects/tensyoki/build/_deps/fmt-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

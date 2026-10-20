@@ -1,0 +1,170 @@
+{
+  "files": [
+    {
+      "file": "data/res/res_else.bin",
+      "status": "FAIL",
+      "magic": "LINK",
+      "version": 3,
+      "file_count": 1,
+      "index_offset": 0,
+      "index_size": 40,
+      "data_offset": 0,
+      "flags": 44,
+      "reserved": [
+        158624,
+        158672,
+        5864,
+        0
+      ],
+      "entries": [],
+      "type_distribution": {},
+      "data_coverage": 0.0,
+      "size": 164540,
+      "sha256": "a939e8fff4912013907c5b09a1e718ea79c27786e7eb6ec6d69e9ad5eb707049",
+      "errors": [
+        "index_offset 0 < header_size 44 (original=0)",
+        "index_size 40 != file_count 1 * 24",
+        "data_offset 0 < index_end 40 (original_data_off=0)"
+      ],
+      "warnings": [],
+      "hints": []
+    },
+    {
+      "file": "data/res/res_exp.bin",
+      "status": "FAIL",
+      "magic": "LINK",
+      "version": 1,
+      "file_count": 1,
+      "index_offset": 0,
+      "index_size": 24,
+      "data_offset": 263608,
+      "flags": 1263421772,
+      "reserved": [
+        1,
+        32,
+        111,
+        64
+      ],
+      "entries": [],
+      "type_distribution": {},
+      "data_coverage": 0.0,
+      "size": 263636,
+      "sha256": "b2a1558690c1be07d2052103f8a31b282c4cff68bdac785d2b826e3206e9b173",
+      "errors": [
+        "index_offset 0 < header_size 44 (original=0)"
+      ],
+      "warnings": [],
+      "hints": []
+    },
+    {
+      "file": "data/res/res_exp_pc.bin",
+      "status": "FAIL",
+      "magic": "LINK",
+      "version": 1,
+      "file_count": 1,
+      "index_offset": 0,
+      "index_size": 24,
+      "data_offset": 8372,
+      "flags": 1263421772,
+      "reserved": [
+        1,
+        32,
+        2,
+        64
+      ],
+      "entries": [],
+      "type_distribution": {},
+      "data_coverage": 0.0,
+      "size": 8400,
+      "sha256": "b776805223fc17ec201cab23f2339db03072ad80a8f86389b5461f6a2ef8cb1f",
+      "errors": [
+        "index_offset 0 < header_size 44 (original=0)"
+      ],
+      "warnings": [],
+      "hints": []
+    },
+    {
+      "file": "data/res/res_grp.bin",
+      "status": "FAIL",
+      "magic": "LINK",
+      "version": 21,
+      "file_count": 1,
+      "index_offset": 44,
+      "index_size": 184,
+      "data_offset": 4723248,
+      "flags": 4723436,
+      "reserved": [
+        3712828,
+        8436268,
+        263608,
+        8699880
+      ],
+      "entries": [],
+      "type_distribution": {},
+      "data_coverage": 0.0,
+      "size": 365574996,
+      "sha256": "e31700c0262cc6aa82f8b9e6a643fa049e88c2293caadf0f42da99b6bf3ff5d7",
+      "errors": [
+        "index_size 184 != file_count 1 * 24"
+      ],
+      "warnings": [],
+      "hints": []
+    },
+    {
+      "file": "data/res/res_shader.bin",
+      "status": "FAIL",
+      "magic": "LINK",
+      "version": 6,
+      "file_count": 1,
+      "index_offset": 44,
+      "index_size": 64,
+      "data_offset": 3500,
+      "flags": 3568,
+      "reserved": [
+        1064,
+        4636,
+        1644,
+        6284
+      ],
+      "entries": [],
+      "type_distribution": {},
+      "data_coverage": 0.0,
+      "size": 6284,
+      "sha256": "76f4c449479a659e01a97fc21d46d9d6e7ea4b5f1cc31e3b24362de9de21b6f6",
+      "errors": [
+        "index_size 64 != file_count 1 * 24"
+      ],
+      "warnings": [],
+      "hints": []
+    },
+    {
+      "file": "data/res/res_snd.bin",
+      "status": "FAIL",
+      "magic": "LINK",
+      "version": 2,
+      "file_count": 1,
+      "index_offset": 0,
+      "index_size": 32,
+      "data_offset": 3909236,
+      "flags": 3909272,
+      "reserved": [
+        5268,
+        1463960671,
+        808464432,
+        3909236
+      ],
+      "entries": [],
+      "type_distribution": {},
+      "data_coverage": 0.0,
+      "size": 3914544,
+      "sha256": "483eac77a5b91435c24d7c806540900432273d332de991c2fad2eefddd80d5c4",
+      "errors": [
+        "index_offset 0 < header_size 44 (original=0)",
+        "index_size 32 != file_count 1 * 24"
+      ],
+      "warnings": [],
+      "hints": []
+    }
+  ],
+  "overall": 1
+}

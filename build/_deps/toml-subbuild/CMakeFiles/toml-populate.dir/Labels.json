@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/CMakeFiles/toml-populate"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/CMakeFiles/toml-populate.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/CMakeFiles/toml-populate-complete.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-build.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-configure.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-download.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-install.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-mkdir.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-patch.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-test.rule"
+		},
+		{
+			"file" : "/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/toml-populate-prefix/src/toml-populate-stamp/toml-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"toml-populate"
+		],
+		"name" : "toml-populate"
+	}
+}

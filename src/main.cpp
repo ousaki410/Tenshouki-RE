@@ -9,6 +9,7 @@
 #include "render/renderer.hpp"
 #include "resource/bin_parser.hpp"
 #include "ui/imgui_backend.hpp"
+#include "ui/texture_atlas_viewer.hpp"
 #include "platform/platform.hpp"
 
 #include <SDL3/SDL.h>
@@ -48,6 +49,7 @@ private:
     std::unique_ptr<Renderer> renderer_;
     std::unique_ptr<ImGuiBackend> imgui_;
     std::unique_ptr<Platform> platform_;
+    std::unique_ptr<TextureAtlasViewer> atlas_viewer_;
     std::filesystem::path data_root_;
     std::string imgui_ini_path_;  // ImGui ini 文件路径，需在 init() 期间保持有效
     
@@ -114,6 +116,19 @@ private:
         if (!imgui_->init(imgui_params)) {
             LOG_ERROR("ImGui initialization failed");
             return false;
+        }
+        
+        // 初始化纹理图集查看器
+        atlas_viewer_ = std::make_unique<TextureAtlasViewer>(*renderer_);
+        
+        // 加载纹理图集
+        auto atlas_path = data_root_ / "res" / "extracted_e1_t0_1024x1024_bgra.png";
+        if (std::filesystem::exists(atlas_path)) {
+            if (!atlas_viewer_->load_atlas(atlas_path, "res_grp.bin Entry 1 Texture 0")) {
+                LOG_WARN("Failed to load texture atlas: {}", atlas_path.string());
+            }
+        } else {
+            LOG_WARN("Texture atlas not found: {}", atlas_path.string());
         }
         
         // 设置中文字体
@@ -277,12 +292,18 @@ private:
             
             if (ImGui::BeginMenu("Debug")) {
                 ImGui::MenuItem("Resource Browser", nullptr, &show_resource_browser_);
+                ImGui::MenuItem("Texture Atlas Viewer", nullptr, &show_atlas_viewer_);
                 ImGui::MenuItem("Shader Viewer", nullptr, &show_shader_viewer_);
                 ImGui::MenuItem("Data Table Viewer", nullptr, &show_dat_viewer_);
                 ImGui::EndMenu();
             }
             
             ImGui::EndMainMenuBar();
+        }
+        
+        // 纹理图集查看器
+        if (show_atlas_viewer_ && atlas_viewer_) {
+            atlas_viewer_->draw();
         }
         
         // 资源浏览器
@@ -540,6 +561,7 @@ private:
     bool show_resource_browser_ = false;
     bool show_shader_viewer_ = false;
     bool show_dat_viewer_ = false;
+    bool show_atlas_viewer_ = false;
 
     std::unique_ptr<BinArchive> selected_archive_;
     const BinFileEntry* selected_entry_ = nullptr;

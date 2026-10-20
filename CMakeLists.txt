@@ -142,11 +142,13 @@ target_sources(tensyoki PRIVATE
     src/resource/grp_parser.cpp
     src/resource/dat_parser.cpp
     src/ui/imgui_backend.cpp
+    src/ui/texture_atlas_viewer.hpp
 )
 
 target_include_directories(tensyoki PRIVATE
     src
     src/core
+    src/ui
     ${glad_SOURCE_DIR}/include
     $<TARGET_PROPERTY:glad,INTERFACE_INCLUDE_DIRECTORIES>
 )

@@ -1,0 +1,18 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/ou/Projects/tensyoki/build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/sdl3-build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/spdlog-build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/fmt-build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/toml-build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/glm-build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/glm-build/glm/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/glad-build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/src/test/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/googletest-build/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/googletest-build/googlemock/cmake_install.cmake",
+		"/home/ou/Projects/tensyoki/build/_deps/googletest-build/googletest/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

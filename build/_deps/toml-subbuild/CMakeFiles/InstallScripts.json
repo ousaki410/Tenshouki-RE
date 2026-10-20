@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/ou/Projects/tensyoki/build/_deps/toml-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

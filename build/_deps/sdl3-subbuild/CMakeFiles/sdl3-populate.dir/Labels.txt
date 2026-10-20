@@ -1,0 +1,14 @@
+# Target labels
+ sdl3-populate
+# Source files and their labels
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/CMakeFiles/sdl3-populate
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/CMakeFiles/sdl3-populate.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/CMakeFiles/sdl3-populate-complete.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-build.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-configure.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-download.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-install.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-mkdir.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-patch.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-test.rule
+/home/ou/Projects/tensyoki/build/_deps/sdl3-subbuild/sdl3-populate-prefix/src/sdl3-populate-stamp/sdl3-populate-update.rule
