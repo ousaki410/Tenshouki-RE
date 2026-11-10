@@ -48,6 +48,10 @@ struct CastlePos {
     // Sprite texture for this castle (loaded from GT1G)
     std::shared_ptr<Renderer::Texture> sprite_tex;
     bool sprite_loaded = false;
+    // Campaign ownership
+    bool is_player_owned = false;  // Player controls this castle
+    uint32_t owner_id = 0;         // 0 = neutral, 1 = player, 2+ = enemy factions
+    bool is_capital = false;       // Capital city (important victory condition)
 };
 
 /// Camera for the map
@@ -145,9 +149,28 @@ public:
     /// Check if a castle passes all visibility filters
     bool is_castle_visible(uint32_t index) const;
 
+    /// Campaign: set castle ownership
+    void set_castle_owner(uint32_t castle_index, uint32_t owner_id, bool is_player);
+
+    /// Campaign: get castles owned by player
+    std::vector<uint32_t> get_player_castles() const;
+
+    /// Campaign: get enemy castles adjacent to a player castle (attack targets)
+    std::vector<uint32_t> get_attackable_enemy_castles(uint32_t from_castle) const;
+
+    /// Campaign: check if castle can be attacked from player's territory
+    bool can_attack_from_player_castle(uint32_t target_castle) const;
+
+    /// Campaign: count castles owned by player
+    int32_t player_castle_count() const;
+
     /// Request flags set by UI buttons, checked by MapViewState
     bool request_castle_command = false;
     bool request_battle = false;
+
+    /// Campaign: castle selected for attack (set by UI)
+    std::optional<uint32_t> attack_from_castle = std::nullopt;
+    std::optional<uint32_t> attack_target_castle = std::nullopt;
 
     /// Clear request flags (call after processing in MapViewState)
     void clear_requests() {

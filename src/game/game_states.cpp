@@ -110,12 +110,21 @@ bool MapViewState::update(float dt) {
     }
     if (map_view_.request_battle) {
         map_view_.clear_requests();
-        auto sel = map_view_.selected_castle();
-        if (sel) {
-            ctx_.selected_castle_id = *sel;
-            ctx_.battle_target_castle = *sel;
-            ctx_.pending_push = GameContext::PendingState::Battle;
+        if (map_view_.attack_from_castle && map_view_.attack_target_castle) {
+            // Campaign battle: from specific castle to target
+            ctx_.selected_castle_id = *map_view_.attack_from_castle;
+            ctx_.battle_target_castle = *map_view_.attack_target_castle;
+            map_view_.attack_from_castle.reset();
+            map_view_.attack_target_castle.reset();
+        } else {
+            // Direct battle from selected castle
+            auto sel = map_view_.selected_castle();
+            if (sel) {
+                ctx_.selected_castle_id = *sel;
+                ctx_.battle_target_castle = *sel;
+            }
         }
+        ctx_.pending_push = GameContext::PendingState::Battle;
     }
 
     return true;

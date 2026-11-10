@@ -69,6 +69,17 @@ bool MapView::init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
         }
     }
 
+    // Set default campaign ownership: player owns castle 0, nearby castles
+    // are enemy-controlled, others are neutral
+    for (size_t i = 0; i < castles_.size(); ++i) {
+        if (i == 0) {
+            set_castle_owner(castles_[i].index, 1, true);  // Player starts with castle 0
+        } else if (i < 3) {
+            set_castle_owner(castles_[i].index, 2, false);  // Nearby enemy castles
+        }
+        // Others remain neutral (owner_id = 0)
+    }
+
     LOG_INFO("MapView: {} castles, {} routes, {} regions",
              castles_.size(), routes_.size(), regions_.size());
     return true;
@@ -494,6 +505,15 @@ void MapView::render(Renderer& renderer) {
 
         float size = 16.0f * camera_.zoom;
         draw_castle_sprite(fg_draw, cp, p.x, p.y, size);
+
+        // Draw ownership indicator (ownership dot below castle)
+        float dot_size = 3.0f * camera_.zoom;
+        ImU32 owner_col = cp.is_player_owned
+            ? IM_COL32(0, 255, 0, 220)     // Player: green
+            : (cp.owner_id != 0
+                ? IM_COL32(255, 0, 0, 220)  // Enemy: red
+                : IM_COL32(128, 128, 128, 220));  // Neutral: gray
+        fg_draw->AddCircleFilled({p.x, p.y + size * 0.7f}, dot_size, owner_col, 6);
     }
 
     // --- Render selected castle highlight (halo) ---
@@ -621,31 +641,63 @@ void MapView::render_ui(Renderer& renderer) {
                 request_battle = true;
             }
 
-            // Route planning
+            // Campaign: Attack from this castle
             ImGui::Separator();
-            ImGui::Text("Route Planning:");
-            if (ImGui::Button("Set as Route Start", {-1, 0})) {
-                route_from_ = *selected_;
-                LOG_INFO("MapView: set route start to castle {}", *selected_);
-            }
-            if (ImGui::Button("Set as Route End", {-1, 0})) {
-                route_to_ = *selected_;
-                LOG_INFO("MapView: set route end to castle {}", *selected_);
-            }
-            if (route_from_ && route_to_) {
-                ImGui::SameLine();
-                if (ImGui::Button("Plan Route", {-1, 0})) {
-                    plan_route(*route_from_, *route_to_);
-                    LOG_INFO("MapView: planned route from {} to {}", *route_from_,
-                             *route_to_);
+            ImGui::Text("Campaign:");
+            if (cp->is_player_owned) {
+                ImGui::Text("Owner: Player (Your castle)");
+                auto attackable = get_attackable_enemy_castles(cp->index);
+                if (!attackable.empty()) {
+                    ImGui::Text("Attackable enemies: %zu", attackable.size());
+                    static int attack_target_idx = 0;
+                    if (attack_target_idx >= (int)attackable.size())
+                        attack_target_idx = 0;
+                    std::vector<const char*> target_names;
+                    for (auto tid : attackable) {
+                        const CastlePos* tc = nullptr;
+                        for (const auto& c : castles_) {
+                            if (c.index == tid) { tc = &c; break; }
+                        }
+                        target_names.push_back(tc
+                            ? (tc->name_utf8.empty() ? tc->name.c_str()
+                                                     : tc->name_utf8.c_str())
+                            : "Unknown");
+                    }
+                    if (ImGui::Combo("##attack_target", &attack_target_idx,
+                                     target_names.data(),
+                                     (int)target_names.size())) {
+                        attack_from_castle = cp->index;
+                        attack_target_castle = attackable[attack_target_idx];
+                    }
+                    if (ImGui::Button("Launch Attack", {-1, 0})) {
+                        if (attack_from_castle && attack_target_castle) {
+                            request_battle = true;
+                        }
+                    }
+                } else {
+                    ImGui::TextDisabled("No adjacent enemy castles");
                 }
-            }
-            if (route_from_ || route_to_) {
-                ImGui::SameLine();
-                if (ImGui::Button("Clear Route", {-1, 0})) {
-                    route_from_ = std::nullopt;
-                    route_to_ = std::nullopt;
-                    planned_route_.clear();
+            } else {
+                ImGui::Text("Owner: %s",
+                    cp->owner_id != 0 ? "Enemy" : "Neutral");
+                if (can_attack_from_player_castle(cp->index)) {
+                    if (ImGui::Button("Attack This Castle", {-1, 0})) {
+                        // Find nearest player castle to attack from
+                        for (const auto& pc : castles_) {
+                            if (pc.is_player_owned && pc.region_id == cp->region_id) {
+                                float dx = cp->x - pc.x;
+                                float dy = cp->y - pc.y;
+                                if (std::sqrt(dx*dx + dy*dy) < 25.0f) {
+                                    attack_from_castle = pc.index;
+                                    attack_target_castle = cp->index;
+                                    request_battle = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    ImGui::TextDisabled("Too far from your castles");
                 }
             }
 
@@ -748,6 +800,78 @@ bool MapView::is_castle_visible(uint32_t index) const {
     }
 
     return true;
+}
+
+void MapView::set_castle_owner(uint32_t castle_index, uint32_t owner_id,
+                                bool is_player) {
+    for (auto& cp : castles_) {
+        if (cp.index == castle_index) {
+            cp.owner_id = owner_id;
+            cp.is_player_owned = is_player;
+            break;
+        }
+    }
+}
+
+std::vector<uint32_t> MapView::get_player_castles() const {
+    std::vector<uint32_t> result;
+    for (const auto& cp : castles_) {
+        if (cp.is_player_owned) {
+            result.push_back(cp.index);
+        }
+    }
+    return result;
+}
+
+std::vector<uint32_t> MapView::get_attackable_enemy_castles(
+    uint32_t from_castle) const {
+    std::vector<uint32_t> result;
+    const CastlePos* from_cp = nullptr;
+    for (const auto& cp : castles_) {
+        if (cp.index == from_castle) { from_cp = &cp; break; }
+    }
+    if (!from_cp || !from_cp->is_player_owned) return result;
+
+    for (const auto& cp : castles_) {
+        if (!cp.is_player_owned && cp.owner_id != 0) {
+            // Check if adjacent (within same region and close distance)
+            if (cp.region_id == from_cp->region_id) {
+                float dx = cp.x - from_cp->x;
+                float dy = cp.y - from_cp->y;
+                float dist = std::sqrt(dx * dx + dy * dy);
+                if (dist < 25.0f) {  // Adjacent threshold
+                    result.push_back(cp.index);
+                }
+            }
+        }
+    }
+    return result;
+}
+
+bool MapView::can_attack_from_player_castle(uint32_t target_castle) const {
+    const CastlePos* target_cp = nullptr;
+    for (const auto& cp : castles_) {
+        if (cp.index == target_castle) { target_cp = &cp; break; }
+    }
+    if (!target_cp || target_cp->is_player_owned) return false;
+
+    for (const auto& cp : castles_) {
+        if (cp.is_player_owned && cp.region_id == target_cp->region_id) {
+            float dx = target_cp->x - cp.x;
+            float dy = target_cp->y - cp.y;
+            float dist = std::sqrt(dx * dx + dy * dy);
+            if (dist < 25.0f) return true;
+        }
+    }
+    return false;
+}
+
+int32_t MapView::player_castle_count() const {
+    int32_t count = 0;
+    for (const auto& cp : castles_) {
+        if (cp.is_player_owned) count++;
+    }
+    return count;
 }
 
 void MapView::plan_route(uint32_t from, uint32_t to) {

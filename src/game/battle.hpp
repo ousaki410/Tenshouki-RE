@@ -54,6 +54,11 @@ enum class SkillType {
     Silence,        // Enemy cannot use skills for 2 turns
     Poison,         // Enemy takes damage each turn for 3 turns
     Counterattack,  // Self: auto-counterattack when attacked for 2 turns
+    Sleep,          // Enemy cannot act for 2 turns
+    Slow,           // Enemy movement halved for 2 turns
+    Weakness,       // Enemy attack reduced for 3 turns
+    ArmorBreak,     // Enemy defense reduced for 3 turns
+    Burn,           // Enemy takes fire damage each turn for 3 turns
 };
 
 /// Status effect applied to a unit
@@ -63,10 +68,15 @@ struct StatusEffect {
         Silence,    // Cannot use skills
         Poison,     // Take damage each turn
         Counterattack, // Auto-counterattack when attacked
+        Sleep,      // Cannot act (move/attack/skill)
+        Slow,       // Movement halved
+        Weakness,   // Attack reduced
+        ArmorBreak, // Defense reduced
+        Burn,       // Take fire damage each turn
     };
     Type type = Type::None;
     int32_t turns_remaining = 0;  // How many turns the effect lasts
-    int32_t damage_per_turn = 0;  // For Poison: damage each turn
+    int32_t damage_per_turn = 0;  // For Poison/Burn: damage each turn
 };
 
 /// Skill definition
@@ -136,14 +146,55 @@ struct BattleUnit {
         return has_status(StatusEffect::Type::Silence);
     }
 
-    // Get effective attack with morale bonus
-    int32_t effective_attack() const {
-        return attack + (morale - 50) / 10;
+    // Check if unit is sleeping (cannot act at all)
+    bool is_sleeping() const {
+        return has_status(StatusEffect::Type::Sleep);
     }
 
-    // Get effective defense with morale bonus
+    // Check if unit is slowed (movement halved)
+    bool is_slowed() const {
+        return has_status(StatusEffect::Type::Slow);
+    }
+
+    // Check if unit is weakened (attack reduced)
+    bool is_weakened() const {
+        return has_status(StatusEffect::Type::Weakness);
+    }
+
+    // Check if unit has armor broken (defense reduced)
+    bool is_armor_broken() const {
+        return has_status(StatusEffect::Type::ArmorBreak);
+    }
+
+    // Check if unit is burning (takes fire damage each turn)
+    bool is_burning() const {
+        return has_status(StatusEffect::Type::Burn);
+    }
+
+    // Check if unit can act (not sleeping, not dead)
+    bool can_act() const {
+        return !is_dead() && !is_sleeping();
+    }
+
+    // Get effective attack with morale and weakness modifiers
+    int32_t effective_attack() const {
+        int32_t atk = attack + (morale - 50) / 10;
+        if (is_weakened()) atk = atk * 2 / 3;  // Weakness reduces attack by 1/3
+        return std::max(0, atk);
+    }
+
+    // Get effective defense with morale and armor break modifiers
     int32_t effective_defense() const {
-        return defense + (morale - 50) / 10;
+        int32_t def = defense + (morale - 50) / 10;
+        if (is_armor_broken()) def = def * 2 / 3;  // ArmorBreak reduces defense by 1/3
+        return std::max(0, def);
+    }
+
+    // Get effective movement with slow modifier
+    int32_t effective_move() const {
+        int32_t mv = move;
+        if (is_slowed()) mv = mv / 2;  // Slow halves movement
+        return std::max(1, mv);
     }
 
     // Get attack range based on unit type

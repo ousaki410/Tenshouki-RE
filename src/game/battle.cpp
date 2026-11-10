@@ -618,7 +618,13 @@ void BattleStateData::apply_status_effect(BattleUnit& unit, StatusEffect::Type t
     add_event(fmt::format("{} afflicted with {}!", unit.name,
                           type == StatusEffect::Type::Silence ? "Silence" :
                           type == StatusEffect::Type::Poison ? "Poison" :
-                          "Counterattack"),
+                          type == StatusEffect::Type::Counterattack ? "Counterattack" :
+                          type == StatusEffect::Type::Sleep ? "Sleep" :
+                          type == StatusEffect::Type::Slow ? "Slow" :
+                          type == StatusEffect::Type::Weakness ? "Weakness" :
+                          type == StatusEffect::Type::ArmorBreak ? "Armor Break" :
+                          type == StatusEffect::Type::Burn ? "Burn" :
+                          "effect"),
               false, 0, false);
 }
 
@@ -638,15 +644,45 @@ void BattleStateData::process_status_effects(BattleUnit& unit) {
         }
     }
 
+    // Process Burn damage
+    if (unit.has_status(StatusEffect::Type::Burn)) {
+        int32_t burn_dmg = 10;  // Fixed burn damage per turn
+        unit.hp = std::max(0, unit.hp - burn_dmg);
+        add_event(fmt::format("{} takes {} burn damage! HP: {}",
+                              unit.name, burn_dmg, unit.hp),
+                  unit.is_player, burn_dmg, false);
+        if (unit.is_dead()) {
+            terrain_grid_[idx(unit.grid_x, unit.grid_y)].unit_id = 0;
+            add_event(fmt::format("{} was consumed by fire!", unit.name),
+                      unit.is_player);
+            check_win_conditions();
+        }
+    }
+
+    // Sleeping units skip their turn (has_acted stays true from previous turn)
+    if (unit.has_status(StatusEffect::Type::Sleep)) {
+        add_event(fmt::format("{} is asleep and cannot act!", unit.name),
+                  unit.is_player, 0, false);
+    }
+
     // Decrement turn counters and remove expired effects
     auto it = unit.status_effects.begin();
     while (it != unit.status_effects.end()) {
         it->turns_remaining--;
         if (it->turns_remaining <= 0) {
-            add_event(fmt::format("{}'s {} wore off.", unit.name,
-                                  it->type == StatusEffect::Type::Silence ? "Silence" :
-                                  it->type == StatusEffect::Type::Poison ? "Poison" :
-                                  "Counterattack"),
+            std::string effect_name;
+            switch (it->type) {
+                case StatusEffect::Type::Silence:   effect_name = "Silence"; break;
+                case StatusEffect::Type::Poison:    effect_name = "Poison"; break;
+                case StatusEffect::Type::Counterattack: effect_name = "Counterattack"; break;
+                case StatusEffect::Type::Sleep:     effect_name = "Sleep"; break;
+                case StatusEffect::Type::Slow:      effect_name = "Slow"; break;
+                case StatusEffect::Type::Weakness:  effect_name = "Weakness"; break;
+                case StatusEffect::Type::ArmorBreak: effect_name = "Armor Break"; break;
+                case StatusEffect::Type::Burn:      effect_name = "Burn"; break;
+                default: effect_name = "effect"; break;
+            }
+            add_event(fmt::format("{}'s {} wore off.", unit.name, effect_name),
                       unit.is_player, 0, false);
             it = unit.status_effects.erase(it);
         } else {
@@ -673,6 +709,10 @@ void BattleStateData::next_turn() {
             u.morale = std::min(u.max_morale, u.morale + 5);
             // Process status effects at start of unit's turn
             process_status_effects(u);
+            // Sleeping units cannot act this turn
+            if (u.is_sleeping()) {
+                u.has_acted = true;
+            }
         }
     }
 
@@ -893,6 +933,61 @@ int32_t BattleStateData::use_skill(BattleUnit& user, const BattleSkill& skill,
             }
             break;
         }
+        case SkillType::Sleep: {
+            // Sleep: enemy cannot act for 2 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player != user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::Sleep, 2);
+                add_event(fmt::format("{} puts {} to sleep! Cannot act for 2 turns.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
+            break;
+        }
+        case SkillType::Slow: {
+            // Slow: enemy movement halved for 2 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player != user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::Slow, 2);
+                add_event(fmt::format("{} slows {}! Movement halved for 2 turns.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
+            break;
+        }
+        case SkillType::Weakness: {
+            // Weakness: enemy attack reduced for 3 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player != user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::Weakness, 3);
+                add_event(fmt::format("{} weakens {}! Attack reduced for 3 turns.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
+            break;
+        }
+        case SkillType::ArmorBreak: {
+            // ArmorBreak: enemy defense reduced for 3 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player != user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::ArmorBreak, 3);
+                add_event(fmt::format("{} breaks {}'s armor! Defense reduced for 3 turns.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
+            break;
+        }
+        case SkillType::Burn: {
+            // Burn: enemy takes fire damage each turn for 3 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player != user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::Burn, 3, 10);
+                add_event(fmt::format("{} burns {}! Fire damage each turn for 3 turns.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
+            break;
+        }
         default:
             break;
     }
@@ -942,6 +1037,8 @@ bool BattleStateData::is_in_skill_range(int32_t ax, int32_t ay,
 void BattleStateData::ai_turn() {
     for (auto& unit : units_) {
         if (unit.is_dead() || unit.is_player || unit.has_acted) continue;
+        // Sleeping units cannot act
+        if (unit.is_sleeping()) continue;
 
         // Find all player units
         std::vector<BattleUnit*> targets;
