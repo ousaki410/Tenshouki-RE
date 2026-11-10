@@ -200,3 +200,18 @@ Common to E-0001..E-0019: date 2026-10-12; method static inspection (`ls`, `sha2
 - Observation: texture 0 is at table offset 0x0C with a 20-byte header, so its pixels start at table offset 0x20 and span until texture 1 at 0x400020, which is exactly 0x400000 = 1024 * 1024 * 4 bytes; byte 0x02 of its entry header is 0xAA (both nibbles 10). Texture 1 to texture 2 spans 0x40014 (0x40000 pixel bytes after a 20-byte header). The remainder after texture 2's header equals 0x40000. The fixed total of 0x70 header bytes equals 28 + 4n + 4n + 20n for n = 3. The same formula gives 0x38 for n = 1 and 0x54 for n = 2, matching `res_exp` and `res_exp_pc`.
 - Related: gt1g.md section 7
 - Result: supports (textures 1 and 2 headers not read)
+
+### E-0020: parser cross-validation on all six containers
+
+- Date: 2026-11-10
+- Source files: `res/res_grp.bin`, `res/res_else.bin`, `res/res_exp.bin`, `res/res_exp_pc.bin`, `res/res_shader.bin`, `res/res_snd.bin`
+- Provenance: same third-party repackaged distribution as E-0001..E-0004
+- Method: static inspection with independent tools
+- Command(s): `python3 tools/verify_resources.py data/res --json report.json`; `TENSYOKI_DATA_ROOT=<game dir> ctest --test-dir build`
+- Observation:
+  - All six containers PASS the validator: entry counts 21, 3, 1, 1, 6, 2; sentinel counts 21, 2, 1, 1, 3, 2; data coverage 100.00%, 99.97%, 99.99%, 99.67%, 98.79%, 100.00%.
+  - The C++ parser reports the same entry counts and the same first-payload offsets (16 + 8 * count) for all six files.
+  - Nested LINK containers decode to the documented descriptor counts in the three GT1G-bearing files.
+  - `res_grp.bin` entries 6, 7, 8, 9, 10, 13, 15, 16 and 20 have data offsets that differ from the data-start rule by 0x10 or -0x10 (e.g. entry 6: actual 0x60, predicted 0x50). Entry 0 follows the rule exactly.
+- Related: link.md sections 6 and 7
+- Result: supports the container layout; refines the data-start rule to entry 0 of the GT1G-bearing files only

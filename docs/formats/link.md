@@ -1,9 +1,9 @@
 # LINK Container (res/*.bin)
 
 Status: draft
-Last updated: 2026-10-12
-Parser: none yet (the existing BIN parser must be re-checked against this layout)
-Tests: none
+Last updated: 2026-11-10
+Parser: `src/resource/bin_parser.cpp` (header, 8-byte table, sentinels, nested LINK)
+Tests: `src/test/test_bin_parser.cpp` (synthetic + real files via `TENSYOKI_DATA_ROOT`)
 
 ## 1. Overview
 
@@ -115,7 +115,7 @@ Statistics from `link_nested.py` (E-0016):
 
 Unresolved: `res_grp` entry 0 reaches x + w = 1280, but texture 0 is 1,024 wide (gt1g.md). The record that causes this has not been identified. Run `tools/link_nested.py` to list records beyond 1,024.
 
-Data start rule: `data_offset = ((descriptor_offset + 12 * n) rounded down to 16) + 16`. It fits the three samples and predicted 0x11C0 for `res_grp`, which was then observed as the actual `GT1G` start (E-0017).
+Data start rule: `data_offset = ((descriptor_offset + 12 * n) rounded down to 16) + 16`. It fits entry 0 of the three samples and predicted 0x11C0 for `res_grp`, which was then observed as the actual `GT1G` start (E-0017). It does not hold for every nested container: `res_grp` entries 6-10, 13, 15, 16 and 20 differ by 0x10 or -0x10 (E-0020), so treat the rule as a property of the tested entry 0 samples rather than a global invariant.
 
 ## 8. Other Payload Observations
 
@@ -147,3 +147,4 @@ The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0
 | 2026-10-12 | Full validation of six files, nested layout hypothesis | E-0007..E-0010 |
 | 2026-10-12 | Decoded descriptor records, gap sentinel, shader payload; corrected res_shader tail analysis | E-0011..E-0015 |
 | 2026-10-12 | Statistics for three nested containers, texture index evidence, second sentinel, GT1G split into gt1g.md | E-0016..E-0019 |
+| 2026-11-10 | Parser and validator rewritten to this layout; all six containers pass; data-start rule limited to the tested samples | E-0020 |

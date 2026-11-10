@@ -312,10 +312,11 @@ std::vector<std::pair<BinFileEntry, ImageData>> GrpParser::parse_all(const BinAr
     std::vector<std::pair<BinFileEntry, ImageData>> results;
     
     for (const auto& entry : archive.entries()) {
-        // Simple heuristic: filter likely images by extension or type
-        const char* ext = entry.guess_extension().c_str();
-        if (strcmp(ext, ".tex") != 0 && strcmp(ext, ".spr") != 0 && 
-            strcmp(ext, ".img") != 0 && entry.type != 1) {
+        // Skip empty slots and payloads that cannot be images
+        if (entry.size == 0) continue;
+        const bool likely_image = entry.signature == "LINK" || entry.signature == "GT1G" ||
+                                  entry.signature == "DDS"  || entry.signature == "PNG";
+        if (!likely_image) {
             continue; // skip obviously non-image entries
         }
         

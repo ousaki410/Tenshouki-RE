@@ -1,9 +1,9 @@
 # GT1G Texture Container
 
 Status: draft
-Last updated: 2026-10-12
-Parser: none yet
-Tests: none
+Last updated: 2026-11-10
+Parser: `src/resource/bin_parser.cpp` (`BinArchive::parse_gt1g`)
+Tests: covered by `src/test/test_bin_parser.cpp` (synthetic GT1G block)
 
 ## 1. Overview
 

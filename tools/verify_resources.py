@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """verify_resources.py - standalone validator for Tenshouki resource containers
 
-Independent of the C++ parser. Performs structural validation against the LINK
-container layout "assumed" in bin_parser.hpp, and emits format-discovery
-information useful for reverse engineering when the format does not match.
+Independent of the C++ parser. Validates the LINK container layout documented
+in docs/formats/link.md (16-byte header, 8-byte entry table, 0x89ABCDEF
+payload sentinel) and decodes nested LINK/GT1G blocks where present.
 Only hashes and metadata are printed, never game content.
 
 Usage:
@@ -15,18 +15,28 @@ import argparse, hashlib, json, math, struct, sys
 from collections import Counter
 from pathlib import Path
 
-HEADER_FMT = "<4sIIIIII4I"     # magic, version, count, idx_off, idx_size, data_off, flags, reserved[4]
-HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 44
-ENTRY_FMT = "<IIIIII"          # hash, offset, size, flags, type, reserved
-ENTRY_SIZE = struct.calcsize(ENTRY_FMT)     # 24
-VERSION_RANGE = (1, 3)
+HEADER_FMT = "<4sIII"          # magic, entry_count, version, reserved
+HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 16
+ENTRY_FMT = "<II"              # absolute offset, size
+ENTRY_SIZE = struct.calcsize(ENTRY_FMT)     # 8
+SENTINEL = 0x89ABCDEF
+SUPPORTED_VERSION = 1
+
+NESTED_DATA_TABLE_OFFSET = 0x20
+NESTED_DESCRIPTOR_OFFSET = 0x40
+NESTED_RECORD_SIZE = 12
+GT1G_FIXED_HEADER_SIZE = 0x1C
+GT1G_TEXTURE_HEADER_SIZE = 20
 
 SIGNATURES = [
     (b"DDS ", "dds"), (b"\x89PNG", "png"), (b"BM", "bmp"), (b"RIFF", "riff/wav"),
-    (b"OggS", "ogg"), (b"LINK", "link"), (b"\x78\x9c", "zlib"), (b"\x78\x01", "zlib"),
+    (b"OggS", "ogg"), (b"LINK", "link"), (b"GT1G", "gt1g"), (b"LS11", "ls11"),
+    (b"DBUG", "dxbc-debug"), (b"DXBC", "dxbc"),
+    (b"\x78\x9c", "zlib"), (b"\x78\x01", "zlib"),
     (b"\x78\xda", "zlib"), (b"\x1f\x8b", "gzip"), (b"MZ", "pe"), (b"\x7fELF", "elf"),
-    (b"#version", "glsl"), (b"DXBC", "dxbc"), (b"\x03\x02\x23\x07", "spirv"),
+    (b"#version", "glsl"), (b"\x03\x02\x23\x07", "spirv"),
 ]
+
 
 def sha256(path):
     h = hashlib.sha256()
@@ -35,17 +45,20 @@ def sha256(path):
             h.update(chunk)
     return h.hexdigest()
 
+
 def entropy(b):
     if not b:
         return 0.0
     n = len(b)
     return -sum(c / n * math.log2(c / n) for c in Counter(b).values())
 
+
 def sniff(b):
     for sig, name in SIGNATURES:
         if b.startswith(sig):
             return name
     return "unknown"
+
 
 def discover(data, size):
     """Format discovery: when the magic is not LINK, return clues that can be used to infer the layout."""
@@ -59,6 +72,91 @@ def discover(data, size):
         info["hint"] = f"possible count={n}, first_offsets={offs}"
     return info
 
+
+def parse_gt1g(block):
+    """Decode a GT1G 0600 block header and texture offset table (docs/formats/gt1g.md)."""
+    if len(block) < GT1G_FIXED_HEADER_SIZE or not block.startswith(b"GT1G"):
+        raise ValueError("not a GT1G block")
+    if block[4:8] != b"0600":
+        raise ValueError(f"unsupported GT1G version tag {block[4:8]!r}")
+
+    total_size, header_size, texture_count = struct.unpack_from("<III", block, 0x08)
+    if texture_count == 0 or texture_count > 4096:
+        raise ValueError(f"invalid texture_count {texture_count}")
+    if header_size != GT1G_FIXED_HEADER_SIZE + 4 * texture_count:
+        raise ValueError(f"header_size {header_size} != {GT1G_FIXED_HEADER_SIZE + 4 * texture_count}")
+    if total_size > len(block):
+        raise ValueError(f"total_size {total_size} > block size {len(block)}")
+
+    effective = total_size or len(block)
+    textures = []
+    for i in range(texture_count):
+        rel = struct.unpack_from("<I", block, header_size + 4 * i)[0]
+        start = header_size + rel
+        if start + GT1G_TEXTURE_HEADER_SIZE > effective:
+            raise ValueError(f"texture {i} header at 0x{start:X} out of bounds")
+        mip_info, format_id, size_log2 = block[start], block[start + 1], block[start + 2]
+        width = 1 << (size_log2 >> 4)
+        height = 1 << (size_log2 & 0x0F)
+        data_offset = start + GT1G_TEXTURE_HEADER_SIZE
+        next_start = (header_size + struct.unpack_from("<I", block, header_size + 4 * (i + 1))[0]
+                      if i + 1 < texture_count else effective)
+        if next_start < data_offset or next_start > effective:
+            raise ValueError(f"texture {i} data range invalid")
+        textures.append({
+            "index": i, "width": width, "height": height,
+            "format_id": format_id, "mip_info": mip_info,
+            "data_offset": data_offset, "data_size": next_start - data_offset,
+        })
+    return {"version": "0600", "total_size": total_size, "header_size": header_size,
+            "texture_count": texture_count, "textures": textures}
+
+
+def parse_nested(payload):
+    """Decode a nested LINK container (docs/formats/link.md section 7)."""
+    if len(payload) < NESTED_DATA_TABLE_OFFSET + 8 or not payload.startswith(b"LINK"):
+        raise ValueError("payload is not a nested LINK container")
+
+    version, data_table_offset, record_count, descriptor_offset = struct.unpack_from("<IIII", payload, 0x04)
+    if data_table_offset + 8 > len(payload):
+        raise ValueError(f"data table at 0x{data_table_offset:X} out of bounds")
+    data_offset, data_size = struct.unpack_from("<II", payload, data_table_offset)
+    if data_offset + data_size > len(payload):
+        raise ValueError(f"data block [0x{data_offset:X}, 0x{data_offset + data_size:X}) exceeds payload")
+
+    descriptor_end = descriptor_offset + record_count * NESTED_RECORD_SIZE
+    if descriptor_offset < NESTED_DATA_TABLE_OFFSET or descriptor_end > data_offset:
+        raise ValueError("descriptor table does not fit before the data block")
+
+    predicted = ((descriptor_end) & ~0xF) + 16
+    records = []
+    for i in range(record_count):
+        pos = descriptor_offset + i * NESTED_RECORD_SIZE
+        x, y, w, h, tex = struct.unpack_from("<HHHHI", payload, pos)
+        records.append({"x": x, "y": y, "w": w, "h": h, "texture_index": tex})
+
+    info = {
+        "version": version,
+        "record_count": record_count,
+        "descriptor_offset": descriptor_offset,
+        "descriptor_end": descriptor_end,
+        "predicted_data_offset": predicted,
+        "data_offset": data_offset,
+        "data_size": data_size,
+        "records": records,
+    }
+
+    block = payload[data_offset:data_offset + data_size]
+    if block.startswith(b"GT1G"):
+        info["gt1g"] = parse_gt1g(block)
+        for rec in records:
+            if rec["texture_index"] >= info["gt1g"]["texture_count"]:
+                info.setdefault("warnings", []).append(
+                    f"record references texture {rec['texture_index']} but only "
+                    f"{info['gt1g']['texture_count']} exist")
+    return info
+
+
 def verify_one(path, manifest=None, strict=False):
     errors = []
     warnings = []
@@ -69,108 +167,121 @@ def verify_one(path, manifest=None, strict=False):
     size = len(data)
 
     if size < HEADER_SIZE:
-        return {"file": str(path), "status": "FAIL", "errors": ["file too small for header"], "warnings": [], "hints": [], "sha256": sha256(path), "size": size}
+        return {"file": str(path), "status": "FAIL", "errors": ["file too small for header"],
+                "warnings": [], "hints": [], "sha256": sha256(path), "size": size}
 
-    # parse the header
-    magic, version, file_count, idx_off, idx_size, data_off, flags, *reserved = struct.unpack_from(HEADER_FMT, data)
+    magic, entry_count, version, reserved = struct.unpack_from(HEADER_FMT, data)
 
-    # version number
-    if not (VERSION_RANGE[0] <= version <= VERSION_RANGE[1]):
-        errors.append(f"version {version} not in {VERSION_RANGE}")
+    if magic != b"LINK":
+        return {
+            "file": str(path), "status": "UNKNOWN_FORMAT",
+            "magic": magic.decode("ascii", errors="ignore"),
+            "size": size, "sha256": sha256(path),
+            "errors": [], "warnings": [], "hints": [discover(data, size)],
+        }
 
-    # index table position/size
-    if idx_off < HEADER_SIZE:
-        errors.append(f"index_offset {idx_off} < HEADER_SIZE {HEADER_SIZE}")
-    if idx_off + idx_size > size:
-        errors.append(f"index table exceeds file: off={idx_off} size={idx_size} file={size}")
-    if idx_size != file_count * ENTRY_SIZE:
-        errors.append(f"index_size {idx_size} != file_count {file_count} * {ENTRY_SIZE}")
+    if not (0 < entry_count <= 100000):
+        errors.append(f"implausible entry_count {entry_count}")
+    if version != SUPPORTED_VERSION:
+        warnings.append(f"version {version} != {SUPPORTED_VERSION}")
+    if reserved != 0:
+        warnings.append(f"reserved header field 0x{reserved:08X} != 0")
 
-    # data region
-    if data_off < idx_off + idx_size:
-        errors.append(f"data_offset {data_off} < index_end {idx_off + idx_size}")
-    if data_off > size:
-        errors.append(f"data_offset {data_off} > file_size {size}")
-
-    # parse the index table
-    entries = []
-    if not errors:
-        for i in range(file_count):
-            off = idx_off + i * ENTRY_SIZE
-            e_hash, e_off, e_size, e_flags, e_type, e_reserved = struct.unpack_from(ENTRY_FMT, data, off)
+    table_end = HEADER_SIZE + entry_count * ENTRY_SIZE
+    if table_end > size:
+        errors.append(f"entry table ends at {table_end} > file size {size}")
+        entries = []
+    else:
+        entries = []
+        for i in range(entry_count):
+            offset, length = struct.unpack_from(ENTRY_FMT, data, HEADER_SIZE + i * ENTRY_SIZE)
             entries.append({
                 "index": i,
-                "name_hash": e_hash,
-                "offset": e_off,
-                "size": e_size,
-                "flags": e_flags,
-                "type": e_type,
-                "reserved": e_reserved,
+                "name": f"entry_{i:04d}",
+                "offset": offset,
+                "size": length,
+                "signature": sniff(data[offset:offset + 16]) if length else "empty",
             })
 
-            if e_off + e_size > size - data_off:
-                errors.append(f"entry {i} exceeds data: off={e_off} size={e_size} data_size={size - data_off}")
-            if e_reserved != 0:
-                warnings.append(f"entry {i} reserved != 0 (0x{e_reserved:08X})")
+        for e in entries:
+            if e["size"] == 0:
+                if e["offset"] < table_end:
+                    warnings.append(f"empty entry {e['index']} offset 0x{e['offset']:X} inside table")
+                continue
+            if e["offset"] < table_end:
+                errors.append(f"entry {e['index']} starts inside the table: 0x{e['offset']:X} < 0x{table_end:X}")
+            if e["offset"] + e["size"] > size:
+                errors.append(f"entry {e['index']} exceeds file: 0x{e['offset'] + e['size']:X} > 0x{size:X}")
+            e["sentinel"] = (e["offset"] + e["size"] + 4 <= size and
+                             struct.unpack_from("<I", data, e["offset"] + e["size"])[0] == SENTINEL)
+            if not e["sentinel"]:
+                warnings.append(f"entry {e['index']} has no sentinel at 0x{e['offset'] + e['size']:X}")
 
-    # overlap / duplicate hash checks
-    if not errors:
-        intervals = [(e["offset"], e["offset"] + e["size"], e["index"]) for e in entries]
-        intervals.sort()
-        for i in range(1, len(intervals)):
-            if intervals[i][0] < intervals[i-1][1]:
-                errors.append(f"entries overlap: {intervals[i-1][2]} {intervals[i-1][0]}-{intervals[i-1][1]} vs {intervals[i][2]} {intervals[i][0]}-{intervals[i][1]}")
-        hashes = [e["name_hash"] for e in entries]
-        if len(set(hashes)) != len(hashes):
-            dup = [h for h in hashes if hashes.count(h) > 1]
-            warnings.append(f"duplicate name_hash: {set(dup)}")
+    if entries and entries[0]["size"] > 0 and entries[0]["offset"] != table_end:
+        warnings.append(f"first payload starts at 0x{entries[0]['offset']:X}, expected 0x{table_end:X}")
 
-    # file signature sniffing
-    type_dist = Counter()
-    for e in entries[:200]:
-        if e["size"] > 0:
-            sig = sniff(data[e["offset"] + e["size"] // 2 : e["offset"] + e["size"] // 2 + 16])
-        else:
-            sig = "empty"
-        type_dist[sig] += 1
+    # The documented gap rule: next.offset == prev.offset + prev.size + 4
+    non_empty = [e for e in entries if e["size"] > 0]
+    for prev, cur in zip(non_empty, non_empty[1:]):
+        expected = prev["offset"] + prev["size"] + 4
+        if cur["offset"] != expected:
+            warnings.append(f"gap before entry {cur['index']}: 0x{cur['offset']:X} != expected 0x{expected:X}")
 
-    # data region coverage
-    if entries:
-        total_data = sum(e["size"] for e in entries)
-        coverage = total_data / (size - data_off) if size > data_off else 0
-    else:
-        coverage = 0.0
+    if non_empty and non_empty[-1]["offset"] + non_empty[-1]["size"] + 4 != size:
+        warnings.append(f"last payload ends at 0x{non_empty[-1]['offset'] + non_empty[-1]['size']:X}, expected 0x{size - 4:X}")
 
-    # compute sha256 (done up front so every path can use it)
+    # Nested LINK / GT1G validation
+    nested_entries = 0
+    for e in entries:
+        if e["size"] == 0 or e["signature"] != "link":
+            continue
+        nested_entries += 1
+        try:
+            nested = parse_nested(data[e["offset"]:e["offset"] + e["size"]])
+            e["nested"] = {
+                "version": nested["version"],
+                "record_count": nested["record_count"],
+                "data_offset": nested["data_offset"],
+                "data_size": nested["data_size"],
+                "texture_count": nested.get("gt1g", {}).get("texture_count"),
+            }
+            if nested["predicted_data_offset"] != nested["data_offset"]:
+                warnings.append(
+                    f"entry {e['index']}: data offset 0x{nested['data_offset']:X} != "
+                    f"predicted 0x{nested['predicted_data_offset']:X}")
+            warnings.extend(f"entry {e['index']}: {w}" for w in nested.get("warnings", []))
+        except ValueError as exc:
+            errors.append(f"entry {e['index']}: nested parse failed: {exc}")
+
+    type_dist = Counter(e["signature"] for e in entries)
+    total_data = sum(e["size"] for e in entries)
+    coverage = total_data / size if size else 0.0
+    sentinel_count = sum(1 for e in entries if e.get("sentinel"))
+
     file_sha256 = sha256(path)
 
-    # manifest comparison
-    hash_ok = True
     if manifest and str(path) in manifest:
         m = manifest[str(path)]
         if m.get("sha256") != file_sha256:
             errors.append(f"manifest hash mismatch: expected {m['sha256']} got {file_sha256}")
-            hash_ok = False
         if m.get("size") != size:
             warnings.append(f"manifest size mismatch: expected {m['size']} got {size}")
 
-    status = "UNKNOWN_FORMAT" if magic != b"LINK" else ("PASS" if not errors else "FAIL")
-    if magic != b"LINK":
-        hints = [discover(data, size)]
+    if strict and warnings:
+        errors.extend(f"strict: {w}" for w in warnings)
 
     return {
         "file": str(path),
-        "status": status,
-        "magic": magic.decode("ascii", errors="ignore") if isinstance(magic, bytes) else str(magic),
+        "status": "PASS" if not errors else "FAIL",
+        "magic": "LINK",
         "version": version,
-        "file_count": file_count,
-        "index_offset": idx_off,
-        "index_size": idx_size,
-        "data_offset": data_off,
-        "flags": flags,
-        "reserved": list(reserved),
+        "file_count": entry_count,
+        "table_end": table_end,
+        "reserved": reserved,
         "entries": entries[:20],
+        "nested_entries": nested_entries,
         "type_distribution": dict(type_dist),
+        "sentinel_count": sentinel_count,
         "data_coverage": round(coverage, 4),
         "size": size,
         "sha256": file_sha256,
@@ -178,6 +289,7 @@ def verify_one(path, manifest=None, strict=False):
         "warnings": warnings,
         "hints": hints,
     }
+
 
 def main():
     ap = argparse.ArgumentParser(description="Tenshouki resource container validation")
@@ -210,7 +322,8 @@ def main():
         reports.append(r)
         version = r.get('version', '?')
         sha256_short = r.get('sha256', '?')[:16] if r.get('sha256') else '?'
-        print(f"[{r['status']}] {f.name} v{version} entries={r.get('file_count', '?')} cov={r.get('data_coverage', 0):.2%} sha256={sha256_short}...")
+        print(f"[{r['status']}] {f.name} v{version} entries={r.get('file_count', '?')} "
+              f"sentinels={r.get('sentinel_count', '?')} cov={r.get('data_coverage', 0):.2%} sha256={sha256_short}...")
         if r['errors']:
             for e in r['errors']:
                 print(f"  ERROR: {e}")
@@ -240,6 +353,7 @@ def main():
         print(f"JSON report: {args.json}")
 
     return overall_status
+
 
 if __name__ == "__main__":
     sys.exit(main())

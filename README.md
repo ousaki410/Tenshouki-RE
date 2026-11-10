@@ -12,7 +12,10 @@ A native Linux port of *Nobunaga's Ambition: Tenshouki* (信長の野望・天�
 - Debug UI: ImGui resource browser, hex viewer
 
 **Phase 2 (clean build / baseline validation) — in progress** 🔧
-- Fixing the build system, API drift, and ownership issues
+- Build system, API drift and ownership issues fixed
+- `BinArchive` rewritten to the documented LINK layout (16-byte header, 8-byte table,
+  `0x89ABCDEF` sentinels, nested LINK/GT1G decoding); `tools/verify_resources.py`
+  passes all six `res/*.bin` containers
 
 ## Game files
 
@@ -63,6 +66,9 @@ cmake --build build
 
 # Run tests
 ctest --test-dir build --output-on-failure
+
+# Include the integration tests that read the real containers
+TENSYOKI_DATA_ROOT="/path/to/game/dir" ctest --test-dir build --output-on-failure
 ```
 
 > **Note on the committed `build/` directory**

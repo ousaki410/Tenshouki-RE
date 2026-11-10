@@ -426,13 +426,37 @@ private:
     
     void render_entry_details(const BinFileEntry& entry, const BinArchive& archive) {
         ImGui::Text("Name: %s", entry.name.c_str());
-        ImGui::Text("Hash: 0x%08X", entry.name_hash);
+        ImGui::Text("Index: %u", entry.index);
         ImGui::Text("Offset: 0x%08X (%u)", entry.offset, entry.offset);
         ImGui::Text("Size: 0x%08X (%u bytes)", entry.size, entry.size);
-        ImGui::Text("Type: %u", entry.type);
-        ImGui::Text("Flags: 0x%04X", entry.flags);
+        ImGui::Text("Signature: %s", entry.signature.empty() ? "(none)" : entry.signature.c_str());
         ImGui::Text("Extension: %s", entry.guess_extension().c_str());
-        
+        ImGui::Text("Sentinel: %s", entry.has_sentinel ? "present (0x89ABCDEF)" : "missing");
+
+        // Nested LINK / GT1G details, decoded on demand
+        if (entry.is_nested_link) {
+            auto nested = archive.parse_nested(entry);
+            if (nested) {
+                ImGui::Separator();
+                ImGui::Text("Nested LINK");
+                ImGui::Text("  Version: %u", nested->version);
+                ImGui::Text("  Records: %u", nested->record_count);
+                ImGui::Text("  Descriptor offset: 0x%X", nested->descriptor_offset);
+                ImGui::Text("  Data: 0x%X (%u bytes)", nested->data_offset, nested->data_size);
+                if (nested->textures) {
+                    ImGui::Text("  GT1G textures: %u", nested->textures->texture_count);
+                    for (const auto& tex : nested->textures->textures) {
+                        ImGui::BulletText("#%u: %ux%u, %u bytes at 0x%X",
+                                          tex.index, tex.width, tex.height,
+                                          tex.data_size, tex.data_offset);
+                    }
+                }
+            } else {
+                ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Nested parse failed: %s",
+                                   tensyoki::to_string(nested.error()));
+            }
+        }
+
         ImGui::Separator();
         
         // Action buttons
@@ -515,7 +539,7 @@ private:
 
         std::filesystem::path name = std::filesystem::path(entry.name).filename();
         if (name.empty() || name == "." || name == "..") {
-            name = fmt::format("entry_{:08X}.bin", entry.name_hash);
+            name = fmt::format("entry_{:04d}.bin", entry.index);
         }
 
         const auto dir = std::filesystem::path("extracted") /

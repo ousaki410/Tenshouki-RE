@@ -2,169 +2,557 @@
   "files": [
     {
       "file": "data/res/res_else.bin",
-      "status": "FAIL",
+      "status": "PASS",
       "magic": "LINK",
-      "version": 3,
-      "file_count": 1,
-      "index_offset": 0,
-      "index_size": 40,
-      "data_offset": 0,
-      "flags": 44,
-      "reserved": [
-        158624,
-        158672,
-        5864,
-        0
+      "version": 1,
+      "file_count": 3,
+      "table_end": 40,
+      "reserved": 0,
+      "entries": [
+        {
+          "index": 0,
+          "name": "entry_0000",
+          "offset": 40,
+          "size": 0,
+          "signature": "empty"
+        },
+        {
+          "index": 1,
+          "name": "entry_0001",
+          "offset": 44,
+          "size": 158624,
+          "signature": "ls11",
+          "sentinel": true
+        },
+        {
+          "index": 2,
+          "name": "entry_0002",
+          "offset": 158672,
+          "size": 5864,
+          "signature": "unknown",
+          "sentinel": true
+        }
       ],
-      "entries": [],
-      "type_distribution": {},
-      "data_coverage": 0.0,
+      "nested_entries": 0,
+      "type_distribution": {
+        "empty": 1,
+        "ls11": 1,
+        "unknown": 1
+      },
+      "sentinel_count": 2,
+      "data_coverage": 0.9997,
       "size": 164540,
       "sha256": "a939e8fff4912013907c5b09a1e718ea79c27786e7eb6ec6d69e9ad5eb707049",
-      "errors": [
-        "index_offset 0 < header_size 44 (original=0)",
-        "index_size 40 != file_count 1 * 24",
-        "data_offset 0 < index_end 40 (original_data_off=0)"
-      ],
+      "errors": [],
       "warnings": [],
       "hints": []
     },
     {
       "file": "data/res/res_exp.bin",
-      "status": "FAIL",
+      "status": "PASS",
       "magic": "LINK",
       "version": 1,
       "file_count": 1,
-      "index_offset": 0,
-      "index_size": 24,
-      "data_offset": 263608,
-      "flags": 1263421772,
-      "reserved": [
-        1,
-        32,
-        111,
-        64
+      "table_end": 24,
+      "reserved": 0,
+      "entries": [
+        {
+          "index": 0,
+          "name": "entry_0000",
+          "offset": 24,
+          "size": 263608,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 111,
+            "data_offset": 1408,
+            "data_size": 262200,
+            "texture_count": 1
+          }
+        }
       ],
-      "entries": [],
-      "type_distribution": {},
-      "data_coverage": 0.0,
+      "nested_entries": 1,
+      "type_distribution": {
+        "link": 1
+      },
+      "sentinel_count": 1,
+      "data_coverage": 0.9999,
       "size": 263636,
       "sha256": "b2a1558690c1be07d2052103f8a31b282c4cff68bdac785d2b826e3206e9b173",
-      "errors": [
-        "index_offset 0 < header_size 44 (original=0)"
-      ],
+      "errors": [],
       "warnings": [],
       "hints": []
     },
     {
       "file": "data/res/res_exp_pc.bin",
-      "status": "FAIL",
+      "status": "PASS",
       "magic": "LINK",
       "version": 1,
       "file_count": 1,
-      "index_offset": 0,
-      "index_size": 24,
-      "data_offset": 8372,
-      "flags": 1263421772,
-      "reserved": [
-        1,
-        32,
-        2,
-        64
+      "table_end": 24,
+      "reserved": 0,
+      "entries": [
+        {
+          "index": 0,
+          "name": "entry_0000",
+          "offset": 24,
+          "size": 8372,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 2,
+            "data_offset": 96,
+            "data_size": 8276,
+            "texture_count": 2
+          }
+        }
       ],
-      "entries": [],
-      "type_distribution": {},
-      "data_coverage": 0.0,
+      "nested_entries": 1,
+      "type_distribution": {
+        "link": 1
+      },
+      "sentinel_count": 1,
+      "data_coverage": 0.9967,
       "size": 8400,
       "sha256": "b776805223fc17ec201cab23f2339db03072ad80a8f86389b5461f6a2ef8cb1f",
-      "errors": [
-        "index_offset 0 < header_size 44 (original=0)"
-      ],
+      "errors": [],
       "warnings": [],
       "hints": []
     },
     {
       "file": "data/res/res_grp.bin",
-      "status": "FAIL",
+      "status": "PASS",
       "magic": "LINK",
-      "version": 21,
-      "file_count": 1,
-      "index_offset": 44,
-      "index_size": 184,
-      "data_offset": 4723248,
-      "flags": 4723436,
-      "reserved": [
-        3712828,
-        8436268,
-        263608,
-        8699880
+      "version": 1,
+      "file_count": 21,
+      "table_end": 184,
+      "reserved": 0,
+      "entries": [
+        {
+          "index": 0,
+          "name": "entry_0000",
+          "offset": 184,
+          "size": 4723248,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 372,
+            "data_offset": 4544,
+            "data_size": 4718704,
+            "texture_count": 3
+          }
+        },
+        {
+          "index": 1,
+          "name": "entry_0001",
+          "offset": 4723436,
+          "size": 3712828,
+          "signature": "unknown",
+          "sentinel": true
+        },
+        {
+          "index": 2,
+          "name": "entry_0002",
+          "offset": 8436268,
+          "size": 263608,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 111,
+            "data_offset": 1408,
+            "data_size": 262200,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 3,
+          "name": "entry_0003",
+          "offset": 8699880,
+          "size": 263608,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 111,
+            "data_offset": 1408,
+            "data_size": 262200,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 4,
+          "name": "entry_0004",
+          "offset": 8963492,
+          "size": 1049624,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 77,
+            "data_offset": 992,
+            "data_size": 1048632,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 5,
+          "name": "entry_0005",
+          "offset": 10013120,
+          "size": 33432,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 44,
+            "data_offset": 608,
+            "data_size": 32824,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 6,
+          "name": "entry_0006",
+          "offset": 10046556,
+          "size": 2097304,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 1,
+            "data_offset": 96,
+            "data_size": 2097208,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 7,
+          "name": "entry_0007",
+          "offset": 12143864,
+          "size": 2097304,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 1,
+            "data_offset": 96,
+            "data_size": 2097208,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 8,
+          "name": "entry_0008",
+          "offset": 14241172,
+          "size": 2097304,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 1,
+            "data_offset": 96,
+            "data_size": 2097208,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 9,
+          "name": "entry_0009",
+          "offset": 16338480,
+          "size": 2097304,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 1,
+            "data_offset": 96,
+            "data_size": 2097208,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 10,
+          "name": "entry_0010",
+          "offset": 18435788,
+          "size": 181220,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 22,
+            "data_offset": 352,
+            "data_size": 180868,
+            "texture_count": 22
+          }
+        },
+        {
+          "index": 11,
+          "name": "entry_0011",
+          "offset": 18617012,
+          "size": 369996,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 76,
+            "data_offset": 992,
+            "data_size": 369004,
+            "texture_count": 12
+          }
+        },
+        {
+          "index": 12,
+          "name": "entry_0012",
+          "offset": 18987012,
+          "size": 4195448,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 84,
+            "data_offset": 1088,
+            "data_size": 4194360,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 13,
+          "name": "entry_0013",
+          "offset": 23182464,
+          "size": 66008,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 27,
+            "data_offset": 416,
+            "data_size": 65592,
+            "texture_count": 1
+          }
+        },
+        {
+          "index": 14,
+          "name": "entry_0014",
+          "offset": 23248476,
+          "size": 128320,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 31,
+            "data_offset": 448,
+            "data_size": 127872,
+            "texture_count": 31
+          }
+        },
+        {
+          "index": 15,
+          "name": "entry_0015",
+          "offset": 23376800,
+          "size": 8572537,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 57,
+            "record_count": 57,
+            "data_offset": 1216,
+            "data_size": 146469,
+            "texture_count": null
+          }
+        },
+        {
+          "index": 16,
+          "name": "entry_0016",
+          "offset": 31949341,
+          "size": 279971722,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 856,
+            "record_count": 856,
+            "data_offset": 17152,
+            "data_size": 275226,
+            "texture_count": null
+          }
+        },
+        {
+          "index": 17,
+          "name": "entry_0017",
+          "offset": 311921067,
+          "size": 33245525,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 215,
+            "record_count": 215,
+            "data_offset": 4352,
+            "data_size": 152567,
+            "texture_count": null
+          }
+        },
+        {
+          "index": 18,
+          "name": "entry_0018",
+          "offset": 345166596,
+          "size": 220916,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 42,
+            "data_offset": 576,
+            "data_size": 220340,
+            "texture_count": 42
+          }
+        },
+        {
+          "index": 19,
+          "name": "entry_0019",
+          "offset": 345387516,
+          "size": 4281440,
+          "signature": "link",
+          "sentinel": true,
+          "nested": {
+            "version": 1,
+            "record_count": 31,
+            "data_offset": 448,
+            "data_size": 4280992,
+            "texture_count": 23
+          }
+        }
       ],
-      "entries": [],
-      "type_distribution": {},
-      "data_coverage": 0.0,
+      "nested_entries": 20,
+      "type_distribution": {
+        "link": 20,
+        "unknown": 1
+      },
+      "sentinel_count": 21,
+      "data_coverage": 1.0,
       "size": 365574996,
       "sha256": "e31700c0262cc6aa82f8b9e6a643fa049e88c2293caadf0f42da99b6bf3ff5d7",
-      "errors": [
-        "index_size 184 != file_count 1 * 24"
+      "errors": [],
+      "warnings": [
+        "entry 6: data offset 0x60 != predicted 0x50",
+        "entry 7: data offset 0x60 != predicted 0x50",
+        "entry 8: data offset 0x60 != predicted 0x50",
+        "entry 9: data offset 0x60 != predicted 0x50",
+        "entry 10: data offset 0x160 != predicted 0x150",
+        "entry 13: data offset 0x1A0 != predicted 0x190",
+        "entry 15: data offset 0x4C0 != predicted 0x4B0",
+        "entry 16: data offset 0x4300 != predicted 0x4310",
+        "entry 20: data offset 0x21360 != predicted 0x21370"
       ],
-      "warnings": [],
       "hints": []
     },
     {
       "file": "data/res/res_shader.bin",
-      "status": "FAIL",
+      "status": "PASS",
       "magic": "LINK",
-      "version": 6,
-      "file_count": 1,
-      "index_offset": 44,
-      "index_size": 64,
-      "data_offset": 3500,
-      "flags": 3568,
-      "reserved": [
-        1064,
-        4636,
-        1644,
-        6284
+      "version": 1,
+      "file_count": 6,
+      "table_end": 64,
+      "reserved": 0,
+      "entries": [
+        {
+          "index": 0,
+          "name": "entry_0000",
+          "offset": 64,
+          "size": 3500,
+          "signature": "unknown",
+          "sentinel": true
+        },
+        {
+          "index": 1,
+          "name": "entry_0001",
+          "offset": 3568,
+          "size": 1064,
+          "signature": "unknown",
+          "sentinel": true
+        },
+        {
+          "index": 2,
+          "name": "entry_0002",
+          "offset": 4636,
+          "size": 1644,
+          "signature": "unknown",
+          "sentinel": true
+        },
+        {
+          "index": 3,
+          "name": "entry_0003",
+          "offset": 6284,
+          "size": 0,
+          "signature": "empty"
+        },
+        {
+          "index": 4,
+          "name": "entry_0004",
+          "offset": 6288,
+          "size": 0,
+          "signature": "empty"
+        },
+        {
+          "index": 5,
+          "name": "entry_0005",
+          "offset": 6292,
+          "size": 0,
+          "signature": "empty"
+        }
       ],
-      "entries": [],
-      "type_distribution": {},
-      "data_coverage": 0.0,
+      "nested_entries": 0,
+      "type_distribution": {
+        "unknown": 3,
+        "empty": 3
+      },
+      "sentinel_count": 3,
+      "data_coverage": 0.9879,
       "size": 6284,
       "sha256": "76f4c449479a659e01a97fc21d46d9d6e7ea4b5f1cc31e3b24362de9de21b6f6",
-      "errors": [
-        "index_size 64 != file_count 1 * 24"
-      ],
+      "errors": [],
       "warnings": [],
       "hints": []
     },
     {
       "file": "data/res/res_snd.bin",
-      "status": "FAIL",
+      "status": "PASS",
       "magic": "LINK",
-      "version": 2,
-      "file_count": 1,
-      "index_offset": 0,
-      "index_size": 32,
-      "data_offset": 3909236,
-      "flags": 3909272,
-      "reserved": [
-        5268,
-        1463960671,
-        808464432,
-        3909236
+      "version": 1,
+      "file_count": 2,
+      "table_end": 32,
+      "reserved": 0,
+      "entries": [
+        {
+          "index": 0,
+          "name": "entry_0000",
+          "offset": 32,
+          "size": 3909236,
+          "signature": "unknown",
+          "sentinel": true
+        },
+        {
+          "index": 1,
+          "name": "entry_0001",
+          "offset": 3909272,
+          "size": 5268,
+          "signature": "unknown",
+          "sentinel": true
+        }
       ],
-      "entries": [],
-      "type_distribution": {},
-      "data_coverage": 0.0,
+      "nested_entries": 0,
+      "type_distribution": {
+        "unknown": 2
+      },
+      "sentinel_count": 2,
+      "data_coverage": 1.0,
       "size": 3914544,
       "sha256": "483eac77a5b91435c24d7c806540900432273d332de991c2fad2eefddd80d5c4",
-      "errors": [
-        "index_offset 0 < header_size 44 (original=0)",
-        "index_size 32 != file_count 1 * 24"
-      ],
+      "errors": [],
       "warnings": [],
       "hints": []
     }
   ],
-  "overall": 1
+  "overall": 0
 }
