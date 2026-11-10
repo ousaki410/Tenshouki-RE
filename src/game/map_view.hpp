@@ -112,6 +112,15 @@ public:
     /// Set whether to show region boundaries
     void set_show_regions(bool v) { show_regions_ = v; }
 
+    /// Set search filter for castle names (empty = show all)
+    void set_search_filter(const std::string& filter) { search_filter_ = filter; }
+
+    /// Set active region filter (0 = all regions)
+    void set_active_region(uint32_t region_id) { active_region_ = region_id; }
+
+    /// Set whether to show all regions or only active one
+    void set_show_all_regions(bool v) { show_all_regions_ = v; }
+
     /// Get reference to castles for external access
     const std::vector<CastlePos>& castles() const { return castles_; }
 
@@ -125,6 +134,16 @@ public:
         }
         return std::nullopt;
     }
+
+    /// Get route planning endpoints
+    std::optional<uint32_t> route_from() const { return route_from_; }
+    std::optional<uint32_t> route_to() const { return route_to_; }
+
+    /// Plan a route between two castles
+    void plan_route(uint32_t from, uint32_t to);
+
+    /// Check if a castle passes all visibility filters
+    bool is_castle_visible(uint32_t index) const;
 
     /// Request flags set by UI buttons, checked by MapViewState
     bool request_castle_command = false;
@@ -169,6 +188,9 @@ private:
     void draw_route(ImDrawList* draw, const MapRoute& route,
                     float screen_cx, float screen_cy);
 
+    // Draw planned route path (sequence of castles)
+    void draw_planned_route(ImDrawList* draw, float screen_cx, float screen_cy);
+
     MapCamera camera_;
     std::vector<CastlePos> castles_;
     std::vector<MapRoute> routes_;
@@ -176,7 +198,13 @@ private:
     bool show_names_ = true;
     bool show_routes_ = true;
     bool show_regions_ = true;
+    bool show_all_regions_ = true;
+    uint32_t active_region_ = 0;
+    std::string search_filter_;
     std::optional<uint32_t> selected_;
+    std::optional<uint32_t> route_from_;
+    std::optional<uint32_t> route_to_;
+    std::vector<std::pair<uint32_t, uint32_t>> planned_route_;
     GT1GTextureCache* tex_cache_ = nullptr;
     const BinArchive* grp_archive_ = nullptr;
     Renderer* renderer_ = nullptr;

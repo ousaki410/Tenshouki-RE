@@ -85,8 +85,14 @@ public:
     // Assign an officer as castle lord
     CommandResult assign_lord(uint32_t castle_index, uint32_t officer_id);
 
+    // Dismiss (remove) the castle lord
+    CommandResult dismiss_lord(uint32_t castle_index);
+
     // Recruit troops at a castle
     CommandResult recruit_troops(uint32_t castle_index, int32_t amount);
+
+    // Auto-recruit: fill garrison up to max with available gold
+    CommandResult auto_recruit(uint32_t castle_index);
 
     // Build a facility at a castle
     CommandResult build_facility(uint32_t castle_index, FacilityType type);
@@ -109,11 +115,15 @@ public:
     // Get all castles
     const std::vector<CastleData>& castles() const { return castles_; }
 
-    // Get all available officers (not assigned as lord)
+    // Get all available officers (not assigned as lord anywhere)
     std::vector<uint32_t> get_available_officers(uint32_t exclude_castle_id = 0) const;
+
+    // Get officer name by ID from sndata (helper for UI)
+    std::string get_officer_name(uint32_t officer_id) const;
 
 private:
     std::vector<CastleData> castles_;
+    const SndataArchive* sndata_ = nullptr;  // not owned, set in init()
 };
 
 } // namespace tensyoki

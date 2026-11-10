@@ -6,10 +6,12 @@
 #include "core/logging.hpp"
 #include "resource/dat_parser.hpp"
 #include <algorithm>
+#include <set>
 
 namespace tensyoki {
 
 void CastleCommand::init(const SndataArchive& sndata) {
+    sndata_ = &sndata;
     castles_.clear();
     castles_.reserve(sndata.castle_count());
 
@@ -65,6 +67,20 @@ CommandResult CastleCommand::assign_lord(uint32_t castle_index,
     return CommandResult::Success;
 }
 
+CommandResult CastleCommand::dismiss_lord(uint32_t castle_index) {
+    auto* castle = get_castle(castle_index);
+    if (!castle) return CommandResult::InvalidTarget;
+
+    uint32_t old_lord = castle->lord_officer_id;
+    castle->lord_officer_id = 0;
+    castle->lord_name.clear();
+    castle->lord_name_utf8.clear();
+
+    LOG_INFO("CastleCommand: dismissed officer {} from castle {}",
+             old_lord, castle_index);
+    return CommandResult::Success;
+}
+
 CommandResult CastleCommand::recruit_troops(uint32_t castle_index,
                                             int32_t amount) {
     auto* castle = get_castle(castle_index);
@@ -83,6 +99,29 @@ CommandResult CastleCommand::recruit_troops(uint32_t castle_index,
     castle->garrison += amount;
     LOG_INFO("CastleCommand: recruited {} troops at castle {} (cost: {} gold)",
              amount, castle_index, cost);
+    return CommandResult::Success;
+}
+
+CommandResult CastleCommand::auto_recruit(uint32_t castle_index) {
+    auto* castle = get_castle(castle_index);
+    if (!castle) return CommandResult::InvalidTarget;
+
+    int32_t needed = castle->max_garrison - castle->garrison;
+    if (needed <= 0) return CommandResult::Success;  // Already full
+
+    int32_t cost = needed * recruitment_cost_per_troop();
+    if (castle->gold < cost) {
+        // Recruit as many as possible with available gold
+        int32_t affordable = castle->gold / recruitment_cost_per_troop();
+        if (affordable <= 0) return CommandResult::InsufficientGold;
+        needed = affordable;
+        cost = needed * recruitment_cost_per_troop();
+    }
+
+    castle->gold -= cost;
+    castle->garrison += needed;
+    LOG_INFO("CastleCommand: auto-recruited {} troops at castle {} (cost: {} gold)",
+             needed, castle_index, cost);
     return CommandResult::Success;
 }
 
@@ -195,18 +234,40 @@ int32_t CastleCommand::castle_upgrade_cost(uint32_t castle_index) const {
 std::vector<uint32_t> CastleCommand::get_available_officers(
     uint32_t exclude_castle_id) const {
     std::vector<uint32_t> available;
-    // In a full implementation, this would query the officer database
-    // and exclude officers already assigned as lords
+
+    if (!sndata_) return available;
+
+    // Collect officer IDs already assigned as lords (exclude the given castle)
+    std::set<uint32_t> assigned_ids;
     for (const auto& c : castles_) {
         if (c.index == exclude_castle_id) continue;
         if (c.lord_officer_id != 0) {
-            // Officer already assigned, add as available if not lord here
-            // (simplified: just track assigned officer IDs)
+            assigned_ids.insert(c.lord_officer_id);
         }
     }
-    // Return empty for now - in a full implementation, this would query
-    // the officer database for unassigned officers
+
+    // Find officers from sndata who are not assigned as lords
+    for (const auto& officer : sndata_->officers) {
+        // Skip empty slots (id == 0xFFFF)
+        if (officer.id == 0xFFFF) continue;
+        // Skip already assigned officers
+        if (assigned_ids.count(officer.id)) continue;
+        available.push_back(officer.id);
+    }
+
     return available;
+}
+
+std::string CastleCommand::get_officer_name(uint32_t officer_id) const {
+    if (!sndata_) return "";
+
+    for (const auto& officer : sndata_->officers) {
+        if (officer.id == officer_id) {
+            return officer.name_utf8.empty() ? officer.name_raw
+                                             : officer.name_utf8;
+        }
+    }
+    return "";
 }
 
 } // namespace tensyoki

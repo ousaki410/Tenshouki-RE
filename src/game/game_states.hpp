@@ -70,7 +70,7 @@ public:
 private:
     GameContext& ctx_;
     int selected_castle_ = -1;
-    int selected_command_ = 0;  // 0=View Info, 1=Recruit Troops, 2=Build Wall, 3=Build Barracks, 4=Back
+    int selected_tab_ = 0;  // 0=Recruit, 1=Build, 2=Officer, 3=Upgrade
 };
 
 /// Battle state: tactical combat layer

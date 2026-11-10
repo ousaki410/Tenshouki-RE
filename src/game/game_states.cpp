@@ -315,7 +315,7 @@ CastleCommandState::CastleCommandState(GameContext& ctx) : ctx_(ctx) {}
 void CastleCommandState::enter() {
     LOG_INFO("CastleCommandState: enter");
     selected_castle_ = -1;
-    selected_command_ = 0;
+    selected_tab_ = 0;
 }
 
 bool CastleCommandState::update(float dt) {
@@ -339,18 +339,29 @@ void CastleCommandState::render() {
 
     // Castle selection
     ImGui::Text("Select Castle:");
-    ImGui::BeginChild("CastleList", ImVec2(300, 200), true);
+    ImGui::BeginChild("CastleList", ImVec2(300, 220), true);
     for (const auto& castle : ctx_.castle_command.castles()) {
         bool selected = (selected_castle_ == static_cast<int>(castle.index));
-        std::string label = fmt::format("[{}] {} (Lv.{})",
-                                        castle.index,
-                                        castle.name_utf8.empty()
-                                            ? castle.name
-                                            : castle.name_utf8,
-                                        castle.level);
+        std::string lord_name = "";
+        if (castle.lord_officer_id != 0 && ctx_.sndata) {
+            for (const auto& officer : ctx_.sndata->officers) {
+                if (officer.id == castle.lord_officer_id) {
+                    lord_name = officer.name_utf8.empty()
+                                    ? officer.name_raw
+                                    : officer.name_utf8;
+                    break;
+                }
+            }
+        }
+        std::string label = fmt::format(
+            "[{}] {} (Lv.{}){}",
+            castle.index,
+            castle.name_utf8.empty() ? castle.name : castle.name_utf8,
+            castle.level,
+            lord_name.empty() ? "" : fmt::format(" [Lord: {}]", lord_name));
         if (ImGui::Selectable(label.c_str(), selected)) {
             selected_castle_ = castle.index;
-            selected_command_ = 0;
+            selected_tab_ = 0;
         }
     }
     ImGui::EndChild();
@@ -376,55 +387,188 @@ void CastleCommandState::render() {
             ImGui::Text("Facilities:");
             ImGui::Text("  Wall: %s", castle->has_wall ? "Yes" : "No");
             ImGui::Text("  Barracks: %s", castle->has_barracks ? "Yes" : "No");
-            ImGui::Text("  Storehouse: %s", castle->has_storehouse ? "Yes" : "No");
+            ImGui::Text("  Storehouse: %s",
+                        castle->has_storehouse ? "Yes" : "No");
             ImGui::Text("  Market: %s", castle->has_market ? "Yes" : "No");
             ImGui::Separator();
+            ImGui::Text("Lord: %s",
+                        castle->lord_officer_id != 0
+                            ? ctx_.castle_command.get_officer_name(
+                                  castle->lord_officer_id)
+                                .c_str()
+                            : "(none)");
+            ImGui::Separator();
 
-            // Command selection
-            const char* commands[] = {"View Info", "Recruit Troops",
-                                      "Build Wall", "Build Barracks",
-                                      "Back"};
-            for (int i = 0; i < 5; ++i) {
-                bool selected = (selected_command_ == i);
-                if (ImGui::Selectable(commands[i], selected)) {
-                    selected_command_ = i;
-                    if (i == 1) {  // Recruit
-                        auto result = ctx_.castle_command.recruit_troops(
-                            selected_castle_, 10);
-                        if (result == CommandResult::Success) {
-                            LOG_INFO("Recruited 10 troops at castle {}",
-                                     selected_castle_);
-                        } else if (result == CommandResult::InsufficientGold) {
-                            LOG_WARN("Insufficient gold to recruit troops");
-                        }
-                    } else if (i == 2) {  // Build Wall
-                        auto result = ctx_.castle_command.build_facility(
-                            selected_castle_, FacilityType::Wall);
-                        if (result == CommandResult::Success) {
-                            LOG_INFO("Built wall at castle {}",
-                                     selected_castle_);
-                        } else if (result == CommandResult::InsufficientGold) {
-                            LOG_WARN("Insufficient gold to build wall");
-                        } else if (result == CommandResult::AlreadyBuilt) {
-                            LOG_WARN("Wall already built at castle {}",
-                                     selected_castle_);
-                        }
-                    } else if (i == 3) {  // Build Barracks
-                        auto result = ctx_.castle_command.build_facility(
-                            selected_castle_, FacilityType::Barracks);
-                        if (result == CommandResult::Success) {
-                            LOG_INFO("Built barracks at castle {}",
-                                     selected_castle_);
-                        } else if (result == CommandResult::InsufficientGold) {
-                            LOG_WARN("Insufficient gold to build barracks");
-                        } else if (result == CommandResult::AlreadyBuilt) {
-                            LOG_WARN("Barracks already built at castle {}",
-                                     selected_castle_);
-                        }
-                    } else if (i == 4) {  // Back
-                        ctx_.request_pop = true;
+            // Tab buttons for command groups
+            const char* tabs[] = {"Recruit", "Build", "Officer", "Upgrade"};
+            for (int i = 0; i < 4; ++i) {
+                bool selected = (selected_tab_ == i);
+                if (ImGui::Selectable(tabs[i], selected)) {
+                    selected_tab_ = i;
+                }
+                if (i < 3) ImGui::SameLine();
+            }
+            ImGui::Separator();
+
+            if (selected_tab_ == 0) {
+                // ---- Recruit Troops ----
+                ImGui::Text("Recruit Troops:");
+                static int recruit_amount = 10;
+                ImGui::InputInt("Amount", &recruit_amount, 10, 50);
+                if (recruit_amount < 1) recruit_amount = 1;
+                ImGui::SameLine();
+                ImGui::Text("Cost: %d gold",
+                            recruit_amount * ctx_.castle_command.recruitment_cost_per_troop());
+
+                if (ImGui::Button("Recruit", {-1, 0})) {
+                    auto result = ctx_.castle_command.recruit_troops(
+                        selected_castle_, recruit_amount);
+                    if (result == CommandResult::Success) {
+                        LOG_INFO("Recruited {} troops at castle {}",
+                                 recruit_amount, selected_castle_);
+                    } else if (result == CommandResult::InsufficientGold) {
+                        LOG_WARN("Insufficient gold to recruit troops");
                     }
                 }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Auto-Recruit (Max)", {-1, 0})) {
+                    auto result = ctx_.castle_command.auto_recruit(
+                        selected_castle_);
+                    if (result == CommandResult::Success) {
+                        LOG_INFO("Auto-recruited troops at castle {}",
+                                 selected_castle_);
+                    } else if (result == CommandResult::InsufficientGold) {
+                        LOG_WARN("Insufficient gold for auto-recruit");
+                    }
+                }
+
+            } else if (selected_tab_ == 1) {
+                // ---- Build Facilities ----
+                ImGui::Text("Build Facilities:");
+
+                struct FacilityBtn {
+                    FacilityType type;
+                    const char* label;
+                };
+                FacilityBtn facilities[] = {
+                    {FacilityType::Wall, "Build Wall"},
+                    {FacilityType::Barracks, "Build Barracks"},
+                    {FacilityType::Storehouse, "Build Storehouse"},
+                    {FacilityType::Market, "Build Market"},
+                };
+
+                for (const auto& fb : facilities) {
+                    bool already = false;
+                    switch (fb.type) {
+                        case FacilityType::Wall:      already = castle->has_wall; break;
+                        case FacilityType::Barracks:  already = castle->has_barracks; break;
+                        case FacilityType::Storehouse:already = castle->has_storehouse; break;
+                        case FacilityType::Market:    already = castle->has_market; break;
+                        case FacilityType::None:      already = true; break;
+                    }
+                    int cost = ctx_.castle_command.facility_cost(fb.type);
+                    bool affordable = castle->gold >= cost;
+
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                                          already ? ImVec4(0.5f, 0.5f, 0.5f, 1.0f)
+                                                  : (affordable ? ImVec4(1, 1, 1, 1)
+                                                                : ImVec4(1, 0.5f, 0.5f, 1.0f)));
+                    std::string btn_label = fmt::format("{} ({} gold){}",
+                                                        fb.label, cost,
+                                                        already ? " [Built]"
+                                                                : (affordable ? "" : " [Poor]"));
+                    if (ImGui::Button(btn_label.c_str(), {-1, 0}) &&
+                        !already && affordable) {
+                        auto result = ctx_.castle_command.build_facility(
+                            selected_castle_, fb.type);
+                        if (result == CommandResult::Success) {
+                            LOG_INFO("Built {} at castle {}", fb.label,
+                                     selected_castle_);
+                        } else if (result == CommandResult::InsufficientGold) {
+                            LOG_WARN("Insufficient gold to build {}", fb.label);
+                        } else if (result == CommandResult::AlreadyBuilt) {
+                            LOG_WARN("{} already built at castle {}", fb.label,
+                                     selected_castle_);
+                        }
+                    }
+                    ImGui::PopStyleColor();
+                }
+
+            } else if (selected_tab_ == 2) {
+                // ---- Officer Assignment ----
+                ImGui::Text("Appoint Lord:");
+
+                // Show current lord
+                if (castle->lord_officer_id != 0) {
+                    std::string lord_name =
+                        ctx_.castle_command.get_officer_name(
+                            castle->lord_officer_id);
+                    ImGui::Text("Current Lord: %s",
+                                lord_name.empty() ? "(unknown)"
+                                                  : lord_name.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::Button("Dismiss Lord", {-1, 0})) {
+                        auto result = ctx_.castle_command.dismiss_lord(
+                            selected_castle_);
+                        if (result == CommandResult::Success) {
+                            LOG_INFO("Dismissed lord from castle {}",
+                                     selected_castle_);
+                        }
+                    }
+                } else {
+                    ImGui::Text("Current Lord: (none)");
+                }
+
+                ImGui::Separator();
+                ImGui::Text("Available Officers:");
+
+                auto available = ctx_.castle_command.get_available_officers(
+                    static_cast<uint32_t>(selected_castle_));
+                if (available.empty()) {
+                    ImGui::TextDisabled("  (no unassigned officers)");
+                } else {
+                    for (uint32_t off_id : available) {
+                        std::string off_name =
+                            ctx_.castle_command.get_officer_name(off_id);
+                        if (off_name.empty()) off_name = fmt::format("ID {}", off_id);
+                        if (ImGui::Selectable(off_name.c_str())) {
+                            auto result = ctx_.castle_command.assign_lord(
+                                selected_castle_, off_id);
+                            if (result == CommandResult::Success) {
+                                LOG_INFO("Assigned officer {} to castle {}",
+                                         off_id, selected_castle_);
+                            }
+                        }
+                    }
+                }
+
+            } else if (selected_tab_ == 3) {
+                // ---- Upgrade Castle ----
+                ImGui::Text("Upgrade Castle:");
+                int cost = ctx_.castle_command.castle_upgrade_cost(
+                    static_cast<uint32_t>(selected_castle_));
+                ImGui::Text("Current Level: %d", castle->level);
+                ImGui::Text("Next Level: %d", castle->level + 1);
+                ImGui::Text("Cost: %d gold", cost);
+                ImGui::SameLine();
+                ImGui::Text(castle->gold >= cost ? "(Affordable)"
+                                                 : "(Insufficient Gold)");
+                if (ImGui::Button("Upgrade", {-1, 0})) {
+                    auto result = ctx_.castle_command.upgrade_castle(
+                        static_cast<uint32_t>(selected_castle_));
+                    if (result == CommandResult::Success) {
+                        LOG_INFO("Upgraded castle {} to level {}",
+                                 selected_castle_, castle->level);
+                    } else if (result == CommandResult::InsufficientGold) {
+                        LOG_WARN("Insufficient gold to upgrade castle");
+                    }
+                }
+            }
+
+            ImGui::Separator();
+            if (ImGui::Button("Back to Map", {-1, 0})) {
+                ctx_.request_pop = true;
             }
 
             ImGui::EndChild();

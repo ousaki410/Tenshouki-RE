@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <random>
 #include <numeric>
+#include <set>
+#include <cctype>
 #include <fmt/format.h>
 
 namespace tensyoki {
@@ -468,12 +470,21 @@ void MapView::render(Renderer& renderer) {
     // --- Render routes ---
     if (show_routes_) {
         for (const auto& r : routes_) {
+            // Only draw routes where both endpoints are visible
+            if (!is_castle_visible(r.from) || !is_castle_visible(r.to)) continue;
             draw_route(bg_draw, r, screen_cx, screen_cy);
+        }
+
+        // Draw planned route (route planning overlay)
+        if (route_from_ && route_to_) {
+            draw_planned_route(fg_draw, screen_cx, screen_cy);
         }
     }
 
     // --- Render castle markers ---
     for (auto& cp : castles_) {
+        if (!is_castle_visible(cp.index)) continue;
+
         auto p = map_to_screen(cp.x, cp.y);
         p.x += screen_cx;
         p.y += screen_cy;
@@ -505,6 +516,8 @@ void MapView::render(Renderer& renderer) {
     // --- Render castle names ---
     if (show_names_) {
         for (const auto& cp : castles_) {
+            if (!is_castle_visible(cp.index)) continue;
+
             auto p = map_to_screen(cp.x, cp.y);
             p.x += screen_cx;
             p.y += screen_cy - 14.0f;  // Offset above marker
@@ -608,13 +621,41 @@ void MapView::render_ui(Renderer& renderer) {
                 request_battle = true;
             }
 
+            // Route planning
+            ImGui::Separator();
+            ImGui::Text("Route Planning:");
+            if (ImGui::Button("Set as Route Start", {-1, 0})) {
+                route_from_ = *selected_;
+                LOG_INFO("MapView: set route start to castle {}", *selected_);
+            }
+            if (ImGui::Button("Set as Route End", {-1, 0})) {
+                route_to_ = *selected_;
+                LOG_INFO("MapView: set route end to castle {}", *selected_);
+            }
+            if (route_from_ && route_to_) {
+                ImGui::SameLine();
+                if (ImGui::Button("Plan Route", {-1, 0})) {
+                    plan_route(*route_from_, *route_to_);
+                    LOG_INFO("MapView: planned route from {} to {}", *route_from_,
+                             *route_to_);
+                }
+            }
+            if (route_from_ || route_to_) {
+                ImGui::SameLine();
+                if (ImGui::Button("Clear Route", {-1, 0})) {
+                    route_from_ = std::nullopt;
+                    route_to_ = std::nullopt;
+                    planned_route_.clear();
+                }
+            }
+
             ImGui::End();
         }
     }
 
     // --- Camera info ---
     ImGui::SetNextWindowPos({w - 200, 10}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({190, 80}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({190, 140}, ImGuiCond_Always);
     ImGui::Begin("Camera", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
                  ImGuiWindowFlags_AlwaysAutoResize);
@@ -624,6 +665,30 @@ void MapView::render_ui(Renderer& renderer) {
     ImGui::Text("WASD/Arrows: Pan");
     ImGui::Text("Scroll: Zoom");
     ImGui::Text("Home: Reset");
+
+    ImGui::Separator();
+    ImGui::Text("Search Castles:");
+    static char search_buf[64] = "";
+    if (ImGui::InputText("##search", search_buf, IM_ARRAYSIZE(search_buf))) {
+        search_filter_ = search_buf;
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Region Filter:");
+    if (ImGui::Checkbox("All Regions", &show_all_regions_)) {
+        if (show_all_regions_) active_region_ = 0;
+    }
+    if (!show_all_regions_) {
+        ImGui::SameLine();
+        ImGui::Text("Active: %u", active_region_);
+        // Region selector
+        static int region_sel = 0;
+        if (ImGui::InputInt("##region", &region_sel)) {
+            if (region_sel < 0) region_sel = 0;
+            active_region_ = static_cast<uint32_t>(region_sel);
+        }
+    }
+
     ImGui::End();
 }
 
@@ -634,6 +699,7 @@ bool MapView::handle_click(float mx, float my, Renderer& renderer) {
     std::optional<uint32_t> best_idx;
 
     for (const auto& cp : castles_) {
+        if (!is_castle_visible(cp.index)) continue;
         float dx = cp.x - map_pos.x;
         float dy = cp.y - map_pos.y;
         float dist = dx * dx + dy * dy;
@@ -657,6 +723,131 @@ bool MapView::handle_click(float mx, float my, Renderer& renderer) {
     selected_ = std::nullopt;
     for (auto& cp : castles_) cp.selected = false;
     return false;
+}
+
+bool MapView::is_castle_visible(uint32_t index) const {
+    // Find the castle
+    const CastlePos* cp = nullptr;
+    for (const auto& c : castles_) {
+        if (c.index == index) { cp = &c; break; }
+    }
+    if (!cp) return false;
+
+    // Region filter
+    if (!show_all_regions_ && cp->region_id != active_region_) return false;
+
+    // Search filter
+    if (!search_filter_.empty()) {
+        std::string name_lower = cp->name_utf8.empty() ? cp->name : cp->name_utf8;
+        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        std::string filter_lower = search_filter_;
+        std::transform(filter_lower.begin(), filter_lower.end(), filter_lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (name_lower.find(filter_lower) == std::string::npos) return false;
+    }
+
+    return true;
+}
+
+void MapView::plan_route(uint32_t from, uint32_t to) {
+    route_from_ = from;
+    route_to_ = to;
+    planned_route_.clear();
+
+    if (from == to) return;
+
+    // Simple greedy path: connect castles by nearest neighbor within same region
+    // Find start and end castle positions
+    const CastlePos* start_cp = nullptr;
+    const CastlePos* end_cp = nullptr;
+    for (const auto& c : castles_) {
+        if (c.index == from) start_cp = &c;
+        if (c.index == to) end_cp = &c;
+    }
+    if (!start_cp || !end_cp) return;
+
+    // Build path using greedy nearest-neighbor within region
+    uint32_t current = from;
+    std::set<uint32_t> visited;
+    visited.insert(from);
+
+    planned_route_.push_back({from, from});  // placeholder, will be replaced
+
+    for (int step = 0; step < 20; ++step) {  // max 20 hops
+        if (current == to) break;
+
+        // Find nearest unvisited castle in same region
+        const CastlePos* cur_cp = nullptr;
+        for (const auto& c : castles_) {
+            if (c.index == current) { cur_cp = &c; break; }
+        }
+        if (!cur_cp) break;
+
+        uint32_t next = 0;
+        float best_dist = 999999.0f;
+        for (const auto& c : castles_) {
+            if (visited.count(c.index)) continue;
+            if (c.region_id != cur_cp->region_id) continue;
+            if (c.index == current) continue;
+            float dx = c.x - cur_cp->x;
+            float dy = c.y - cur_cp->y;
+            float dist = dx * dx + dy * dy;
+            if (dist < best_dist) {
+                best_dist = dist;
+                next = c.index;
+            }
+        }
+
+        if (next == 0) break;  // No more castles in region
+
+        planned_route_.push_back({current, next});
+        visited.insert(next);
+        current = next;
+
+        if (current == to) break;
+    }
+
+    // Replace first placeholder with actual first edge
+    if (!planned_route_.empty() && planned_route_.front().first == from &&
+        planned_route_.front().second == from) {
+        planned_route_.erase(planned_route_.begin());
+    }
+}
+
+void MapView::draw_planned_route(ImDrawList* draw, float screen_cx,
+                                  float screen_cy) {
+    if (planned_route_.empty()) return;
+
+    ImU32 route_col = IM_COL32(255, 215, 0, 200);  // Gold for planned route
+
+    for (const auto& [from, to] : planned_route_) {
+        const CastlePos* ca = nullptr;
+        const CastlePos* cb = nullptr;
+        for (const auto& c : castles_) {
+            if (c.index == from) ca = &c;
+            if (c.index == to) cb = &c;
+        }
+        if (!ca || !cb) continue;
+
+        auto pa = map_to_screen(ca->x, ca->y);
+        auto pb = map_to_screen(cb->x, cb->y);
+        pa.x += screen_cx; pa.y += screen_cy;
+        pb.x += screen_cx; pb.y += screen_cy;
+
+        draw->AddLine({pa.x, pa.y}, {pb.x, pb.y}, route_col, 3.0f);
+
+        // Draw arrow at destination
+        float dx = pb.x - pa.x;
+        float dy = pb.y - pa.y;
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len > 0) {
+            dx /= len;
+            dy /= len;
+            ImVec2 arrow_head{pb.x - dx * 8.0f, pb.y - dy * 8.0f};
+            draw->AddLine({pb.x, pb.y}, arrow_head, route_col, 2.0f);
+        }
+    }
 }
 
 } // namespace tensyoki
