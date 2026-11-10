@@ -86,6 +86,9 @@ TENSYOKI_DATA_ROOT="/path/to/game/dir" ctest --test-dir build --output-on-failur
 # Or set an environment variable
 export TENSYOKI_DATA_ROOT=/path/to/game/data
 ./build/tensyoki
+
+# Headless self-check: parse all six containers, decode nested LINK/GT1G, exit
+./build/tensyoki --check-resources "/path/to/game/dir"
 ```
 
 ## Project layout

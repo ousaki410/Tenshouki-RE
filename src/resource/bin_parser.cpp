@@ -310,7 +310,9 @@ BinResult<NestedLinkInfo> BinArchive::parse_nested(const BinFileEntry& entry) co
     info.descriptor_offset = read_u32_le(payload, 0x10);
 
     if (info.version != SUPPORTED_VERSION) {
-        LOG_WARN("Nested LINK '{}' has version {}", entry.name, info.version);
+        // Some res_grp entries carry other values here; only the three GT1G
+        // samples have version 1 (docs/formats/link.md, E-0020).
+        LOG_DEBUG("Nested LINK '{}' has version field {}", entry.name, info.version);
     }
     if (info.data_table_offset + 8 > payload.size()) {
         LOG_ERROR("Nested LINK '{}' data table at 0x{:X} is out of bounds",

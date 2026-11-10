@@ -21,8 +21,11 @@
 #include <memory>
 #include <filesystem>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
+#include <string_view>
 #include <system_error>
+#include <vector>
 
 namespace tensyoki {
 
@@ -31,6 +34,23 @@ public:
     Application(int argc, char* argv[]) : argc_(argc), argv_(argv) {}
     
     int run() {
+        // Logging and configuration must be ready before argument parsing
+        Logging::init("tensyoki.log");
+        Config::instance().load("config.toml");
+        parse_args();
+
+        // Headless resource check: no window, no renderer
+        if (check_resources_) {
+            const bool ok = run_resource_check();
+            Logging::shutdown();
+            return ok ? 0 : 1;
+        }
+
+        if (help_requested_) {
+            Logging::shutdown();
+            return 0;
+        }
+
         if (!init()) {
             Logging::shutdown();
             return 1;
@@ -54,17 +74,9 @@ private:
     std::string imgui_ini_path_;  // ImGui ini file path; must stay valid during init()
     
     bool init() {
-        // Initialize logging
-        Logging::init("tensyoki.log");
         LOG_INFO("=== Tensyoki Linux Port ===");
         LOG_INFO("Version: 0.1.0-dev");
         LOG_INFO("Build: {} {}", __DATE__, __TIME__);
-        
-        // Load configuration
-        Config::instance().load("config.toml");
-        
-        // Parse command-line arguments for the data path
-        parse_args();
         
         // Initialize VFS
         if (!VFS::instance().mount(data_root_, "/")) {
@@ -143,9 +155,34 @@ private:
     }
     
     void parse_args() {
+        std::filesystem::path cli_path;
+
+        for (int i = 1; i < argc_; ++i) {
+            std::string_view arg = argv_[i];
+            if (arg == "--check-resources") {
+                check_resources_ = true;
+            } else if (arg == "--help" || arg == "-h") {
+                std::cout << "Usage: tensyoki [options] [data_root]\n"
+                          << "  --check-resources  parse all res/*.bin containers and exit\n"
+                          << "  --help             show this message\n"
+                          << "Environment: TENSYOKI_DATA_ROOT\n";
+                help_requested_ = true;
+            } else if (!arg.empty() && arg.front() == '-') {
+                LOG_WARN("Unknown option: {}", arg);
+            } else if (cli_path.empty()) {
+                cli_path = arg;
+            } else {
+                LOG_WARN("Ignoring extra argument: {}", arg);
+            }
+        }
+
+        if (help_requested_) {
+            return;
+        }
+
         // Priority: command line > environment variables > config file > auto-detection
-        if (argc_ > 1) {
-            data_root_ = argv_[1];
+        if (!cli_path.empty()) {
+            data_root_ = cli_path;
         } else if (const char* env = std::getenv("TENSYOKI_DATA_ROOT")) {
             data_root_ = env;
         } else {
@@ -181,6 +218,56 @@ private:
         } else {
             LOG_INFO("Data root: {}", data_root_.string());
         }
+    }
+
+    /// Parse every known container, decode nested LINK/GT1G blocks.
+    /// Returns false if any container fails to load.
+    bool run_resource_check() {
+        static constexpr const char* kContainers[] = {
+            "res_grp.bin", "res_else.bin", "res_exp.bin",
+            "res_exp_pc.bin", "res_shader.bin", "res_snd.bin",
+        };
+
+        LOG_INFO("Resource check: {}", data_root_.string());
+
+        bool ok = true;
+        for (const char* name : kContainers) {
+            const auto path = data_root_ / "res" / name;
+            BinArchive archive;
+            auto result = archive.load_from_file(path);
+            if (!result) {
+                LOG_ERROR("{}: {}", name, to_string(result.error()));
+                ok = false;
+                continue;
+            }
+
+            size_t nested_links = 0;
+            size_t textures = 0;
+            for (const auto& entry : archive.entries()) {
+                if (!entry.is_nested_link) continue;
+                auto nested = archive.parse_nested(entry);
+                if (!nested) {
+                    LOG_ERROR("{}: entry {}: {}", name, entry.index,
+                              to_string(nested.error()));
+                    ok = false;
+                    continue;
+                }
+                nested_links++;
+                if (nested->textures) textures += nested->textures->texture_count;
+                LOG_DEBUG("{}: entry {}: {} records, {} textures", name, entry.index,
+                          nested->record_count,
+                          nested->textures ? nested->textures->texture_count : 0);
+            }
+
+            const auto info = archive.info();
+            LOG_INFO("{}: version {}, {} entries, {} sentinels, {} bytes, "
+                     "{} nested links, {} textures",
+                     name, info.version, info.file_count, info.sentinel_count,
+                     info.total_size, nested_links, textures);
+        }
+
+        LOG_INFO("Resource check: {}", ok ? "PASS" : "FAIL");
+        return ok;
     }
     
     void test_resource_parsing() {
@@ -586,6 +673,8 @@ private:
     bool show_shader_viewer_ = false;
     bool show_dat_viewer_ = false;
     bool show_atlas_viewer_ = false;
+    bool check_resources_ = false;
+    bool help_requested_ = false;
 
     std::unique_ptr<BinArchive> selected_archive_;
     const BinFileEntry* selected_entry_ = nullptr;
