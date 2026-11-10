@@ -90,8 +90,8 @@ public:
     // Get defense bonus for a unit at a position
     int32_t defense_bonus(int32_t x, int32_t y) const;
 
-    // Execute an attack from attacker to defender
-    bool attack(BattleUnit& attacker, BattleUnit& defender);
+    // Execute an attack from attacker to defender, returns damage dealt
+    int32_t attack(BattleUnit& attacker, BattleUnit& defender);
 
     // Check if position is within attack range (adjacent)
     bool is_in_attack_range(int32_t ax, int32_t ay, int32_t tx, int32_t ty) const;

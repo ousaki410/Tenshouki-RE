@@ -18,6 +18,8 @@
 #include "resource/dat_parser.hpp"
 #include "resource/gt1g_texture_cache.hpp"
 #include "game/game_date.hpp"
+#include "castle_command.hpp"
+#include <imgui.h>
 #include <unordered_map>
 #include <optional>
 
@@ -33,6 +35,19 @@ struct CastlePos {
     bool selected = false;
     bool hovered = false;
     uint32_t region_id = 0;  // Which region this castle belongs to
+    // Facility flags from castle_command
+    bool has_wall = false;
+    bool has_barracks = false;
+    bool has_storehouse = false;
+    bool has_market = false;
+    int32_t level = 1;
+    int32_t garrison = 0;
+    int32_t max_garrison = 0;
+    int32_t gold = 0;
+    int32_t food = 0;
+    // Sprite texture for this castle (loaded from GT1G)
+    std::shared_ptr<Renderer::Texture> sprite_tex;
+    bool sprite_loaded = false;
 };
 
 /// Camera for the map
@@ -68,13 +83,19 @@ public:
 
     /// Initialize with parsed sndata (provides castle names/count)
     bool init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
-              Renderer& renderer);
+              Renderer& renderer, const BinArchive* grp_archive = nullptr);
+
+    /// Update castle data from castle_command (facilities, garrison, etc.)
+    void update_castle_data(const CastleCommand& cmd);
 
     /// Update camera/zoom based on input (called each frame)
     void update(float dt, Renderer& renderer);
 
     /// Render the map (castles, routes, regions, names)
     void render(Renderer& renderer);
+
+    /// Render UI overlay (castle details panel, tooltips)
+    void render_ui(Renderer& renderer);
 
     /// Handle mouse click: returns true if a castle was clicked
     bool handle_click(float mx, float my, Renderer& renderer);
@@ -96,6 +117,24 @@ public:
 
     /// Get reference to regions
     const std::vector<MapRegion>& regions() const { return regions_; }
+
+    /// Get hovered castle index (for tooltips)
+    std::optional<uint32_t> hovered_castle() const {
+        for (const auto& c : castles_) {
+            if (c.hovered) return c.index;
+        }
+        return std::nullopt;
+    }
+
+    /// Request flags set by UI buttons, checked by MapViewState
+    bool request_castle_command = false;
+    bool request_battle = false;
+
+    /// Clear request flags (call after processing in MapViewState)
+    void clear_requests() {
+        request_castle_command = false;
+        request_battle = false;
+    }
 
 private:
     // Generate deterministic positions based on castle index (regional clusters)
@@ -119,6 +158,17 @@ private:
     // Handle mouse wheel zoom
     void handle_mouse_wheel(Renderer& renderer, float y_offset);
 
+    // Load a GT1G portrait texture for a castle (by index)
+    void load_castle_sprite(uint32_t castle_index);
+
+    // Draw a castle sprite marker
+    void draw_castle_sprite(ImDrawList* draw, const CastlePos& cp,
+                            float screen_x, float screen_y, float size);
+
+    // Draw route with distance label
+    void draw_route(ImDrawList* draw, const MapRoute& route,
+                    float screen_cx, float screen_cy);
+
     MapCamera camera_;
     std::vector<CastlePos> castles_;
     std::vector<MapRoute> routes_;
@@ -128,7 +178,10 @@ private:
     bool show_regions_ = true;
     std::optional<uint32_t> selected_;
     GT1GTextureCache* tex_cache_ = nullptr;
+    const BinArchive* grp_archive_ = nullptr;
     Renderer* renderer_ = nullptr;
+    // Shared white pixel texture for fallback markers
+    std::shared_ptr<Renderer::Texture> white_tex_;
 };
 
 } // namespace tensyoki

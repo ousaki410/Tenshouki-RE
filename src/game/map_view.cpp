@@ -3,6 +3,13 @@
  *
  * Renders castles from sndata.dat on a 2D map with camera zoom/pan,
  * routes between castles, region boundaries, and click-to-select interaction.
+ *
+ * Enhancements:
+ *   - City sprites from GT1G textures (fallback to colored dots)
+ *   - Route distance labels and color-coded connections
+ *   - Facility icons (wall, barracks, storehouse, market)
+ *   - Hover tooltips and selected castle detail panel
+ *   - Region-colored selection halos
  */
 
 #include "map_view.hpp"
@@ -13,15 +20,17 @@
 #include <algorithm>
 #include <random>
 #include <numeric>
+#include <fmt/format.h>
 
 namespace tensyoki {
 
 MapView::MapView() = default;
 
 bool MapView::init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
-                   Renderer& renderer) {
+                   Renderer& renderer, const BinArchive* grp_archive) {
     tex_cache_ = &tex_cache;
     renderer_ = &renderer;
+    grp_archive_ = grp_archive;
 
     castles_.clear();
     castles_.reserve(sndata.castle_count());
@@ -35,13 +44,65 @@ bool MapView::init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
         castles_.push_back(cp);
     }
 
+    // Create 1x1 white pixel texture for fallback markers
+    {
+        Renderer::TextureCreateInfo ti{};
+        ti.width = 1;
+        ti.height = 1;
+        ti.format = Renderer::TextureCreateInfo::Format::R8G8B8A8_UNORM;
+        uint8_t white[4] = {255, 255, 255, 255};
+        ti.initial_data = white;
+        ti.data_size = 4;
+        white_tex_ = renderer.create_texture(ti);
+    }
+
     generate_positions();
     build_regions();
     build_routes();
 
+    // Load sprites for castles (using GT1G entries based on castle index)
+    if (grp_archive_ && tex_cache_) {
+        for (uint32_t i = 0; i < castles_.size(); ++i) {
+            load_castle_sprite(i);
+        }
+    }
+
     LOG_INFO("MapView: {} castles, {} routes, {} regions",
              castles_.size(), routes_.size(), regions_.size());
     return true;
+}
+
+void MapView::update_castle_data(const CastleCommand& cmd) {
+    for (auto& cp : castles_) {
+        const CastleData* cd = cmd.get_castle(cp.index);
+        if (cd) {
+            cp.level = cd->level;
+            cp.garrison = cd->garrison;
+            cp.max_garrison = cd->max_garrison;
+            cp.gold = cd->gold;
+            cp.food = cd->food;
+            cp.has_wall = cd->has_wall;
+            cp.has_barracks = cd->has_barracks;
+            cp.has_storehouse = cd->has_storehouse;
+            cp.has_market = cd->has_market;
+        }
+    }
+}
+
+void MapView::load_castle_sprite(uint32_t castle_index) {
+    if (!grp_archive_ || !tex_cache_) return;
+
+    // Try to load a GT1G texture for this castle.
+    // Castle index maps to a GT1G entry in res_grp.bin.
+    // Entries 0-15 are GT1G, entries 16+ are LWC (nested).
+    // We use castle_index % 16 to pick a GT1G entry as a city sprite.
+    uint32_t entry = castle_index % 16;
+    auto tex = tex_cache_->get_or_load(*renderer_, "res_grp.bin",
+                                       *grp_archive_, entry);
+    if (tex) {
+        castles_[castle_index].sprite_tex = tex;
+        castles_[castle_index].sprite_loaded = true;
+    }
 }
 
 void MapView::generate_positions() {
@@ -219,9 +280,6 @@ void MapView::handle_mouse_wheel(Renderer& renderer, float y_offset) {
 
     // Zoom toward mouse position
     if (camera_.zoom != old_zoom) {
-        float zoom_ratio = camera_.zoom / old_zoom;
-        // Adjust camera so zoom centers on mouse
-        // (simplified: just center on current mouse)
         ImVec2 mouse = ImGui::GetMousePos();
         auto map_pos = screen_to_map(mouse.x, mouse.y);
         camera_.x = map_pos.x - (mouse.x - renderer.get_width() * 0.5f) / camera_.zoom;
@@ -232,7 +290,7 @@ void MapView::handle_mouse_wheel(Renderer& renderer, float y_offset) {
 void MapView::update(float dt, Renderer& renderer) {
     handle_camera_input(renderer, dt);
 
-    // Check for mouse wheel (ImGui handles this, but we check directly)
+    // Check for mouse wheel
     if (ImGui::GetIO().MouseWheel != 0.0f) {
         handle_mouse_wheel(renderer, ImGui::GetIO().MouseWheel);
     }
@@ -249,7 +307,7 @@ void MapView::update(float dt, Renderer& renderer) {
         float dx = cp.x - map_pos.x;
         float dy = cp.y - map_pos.y;
         float dist = dx * dx + dy * dy;
-        float threshold = 10.0f / camera_.zoom;
+        float threshold = 12.0f / camera_.zoom;
         if (dist < threshold * threshold && dist < best_dist) {
             best_dist = dist;
             best_idx = cp.index;
@@ -261,6 +319,115 @@ void MapView::update(float dt, Renderer& renderer) {
     }
 }
 
+void MapView::draw_castle_sprite(ImDrawList* draw, const CastlePos& cp,
+                                  float screen_x, float screen_y, float size) {
+    if (cp.sprite_loaded && cp.sprite_tex) {
+        // Draw the GT1G texture as a square sprite
+        GLuint tex_id = cp.sprite_tex->get_id();
+        ImVec2 p_min{screen_x - size * 0.5f, screen_y - size * 0.5f};
+        ImVec2 p_max{screen_x + size * 0.5f, screen_y + size * 0.5f};
+        ImVec2 uv_min{0, 0};
+        ImVec2 uv_max{1, 1};
+        ImU32 col = cp.selected ? IM_COL32(255, 255, 255, 255)
+                                : (cp.hovered ? IM_COL32(255, 255, 255, 230)
+                                              : IM_COL32(255, 255, 255, 200));
+        draw->AddImage(static_cast<ImTextureID>(tex_id),
+                       p_min, p_max, uv_min, uv_max, col);
+        // Draw selection/hover border
+        ImU32 border_col = cp.selected
+            ? IM_COL32(255, 200, 50, 255)
+            : (cp.hovered ? IM_COL32(255, 255, 255, 255)
+                          : IM_COL32(100, 100, 100, 150));
+        draw->AddRect(p_min, p_max, border_col, 0.0f, 0, 1.5f);
+    } else {
+        // Fallback: colored dot
+        float dot_size = size * 0.5f;
+        ImU32 col = cp.selected
+            ? IM_COL32(255, 200, 50, 255)   // selected: gold
+            : (cp.hovered ? IM_COL32(255, 255, 255, 255)  // hovered: white
+                          : IM_COL32(150, 150, 255, 255)); // normal: light blue
+        ImVec2 center{screen_x, screen_y};
+        draw->AddCircleFilled(center, dot_size, col, 10);
+        draw->AddCircle(center, dot_size + 1.0f, IM_COL32(0, 0, 0, 150), 10, 1.5f);
+    }
+
+    // Draw facility icons around the castle (small markers)
+    float icon_offset = size * 0.8f;
+    if (cp.has_wall) {
+        // Wall: small square
+        ImVec2 p_min{screen_x - 2.0f, screen_y - icon_offset - 2.0f};
+        ImVec2 p_max{screen_x + 2.0f, screen_y - icon_offset + 2.0f};
+        draw->AddRectFilled(p_min, p_max, IM_COL32(180, 180, 180, 220));
+    }
+    if (cp.has_barracks) {
+        // Barracks: small triangle pointing up
+        ImVec2 p[3] = {
+            {screen_x, screen_y - icon_offset - 3.0f},
+            {screen_x - 3.0f, screen_y - icon_offset + 3.0f},
+            {screen_x + 3.0f, screen_y - icon_offset + 3.0f},
+        };
+        draw->AddConvexPolyFilled(p, 3, IM_COL32(140, 100, 60, 220));
+    }
+    if (cp.has_storehouse) {
+        // Storehouse: small hexagon (approximated as circle)
+        draw->AddCircleFilled({screen_x, screen_y - icon_offset}, 2.5f,
+                              IM_COL32(100, 180, 100, 220), 6);
+    }
+    if (cp.has_market) {
+        // Market: small diamond
+        ImVec2 p[4] = {
+            {screen_x, screen_y - icon_offset - 3.0f},
+            {screen_x + 3.0f, screen_y - icon_offset},
+            {screen_x, screen_y - icon_offset + 3.0f},
+            {screen_x - 3.0f, screen_y - icon_offset},
+        };
+        draw->AddConvexPolyFilled(p, 4, IM_COL32(220, 200, 100, 220));
+    }
+
+    // Draw garrison strength bar below castle
+    if (cp.max_garrison > 0) {
+        float bar_w = size * 1.5f;
+        float bar_h = 3.0f;
+        float fill = static_cast<float>(cp.garrison) / static_cast<float>(cp.max_garrison);
+        ImVec2 bar_min{screen_x - bar_w * 0.5f, screen_y + size * 0.6f};
+        ImVec2 bar_max{screen_x + bar_w * 0.5f, screen_y + size * 0.6f + bar_h};
+        draw->AddRectFilled(bar_min, bar_max, IM_COL32(60, 60, 60, 180));
+        ImVec2 fill_max{screen_x - bar_w * 0.5f + bar_w * fill,
+                        screen_y + size * 0.6f + bar_h};
+        draw->AddRectFilled(bar_min, fill_max, IM_COL32(100, 200, 100, 220));
+    }
+}
+
+void MapView::draw_route(ImDrawList* draw, const MapRoute& route,
+                          float screen_cx, float screen_cy) {
+    const auto& ca = castles_[route.from];
+    const auto& cb = castles_[route.to];
+    auto pa = map_to_screen(ca.x, ca.y);
+    auto pb = map_to_screen(cb.x, cb.y);
+    pa.x += screen_cx; pa.y += screen_cy;
+    pb.x += screen_cx; pb.y += screen_cy;
+
+    // Color based on whether either endpoint is selected/hovered
+    bool highlighted = ca.selected || cb.selected || ca.hovered || cb.hovered;
+    ImU32 route_col = highlighted
+        ? IM_COL32(255, 200, 50, 200)
+        : IM_COL32(100, 100, 100, 120);
+    float thickness = highlighted ? 2.5f : 1.5f;
+
+    ImVec2 pa_im{pa.x, pa.y};
+    ImVec2 pb_im{pb.x, pb.y};
+    draw->AddLine(pa_im, pb_im, route_col, thickness);
+
+    // Draw distance label at midpoint
+    if (highlighted) {
+        ImVec2 mid{(pa.x + pb.x) * 0.5f, (pa.y + pb.y) * 0.5f};
+        std::string dist_label = fmt::format("{:.0f}", route.distance);
+        draw->AddText(static_cast<ImFont*>(nullptr), 10.0f,
+                      {mid.x - 8.0f, mid.y - 6.0f},
+                      IM_COL32(200, 200, 200, 180), dist_label.c_str());
+    }
+}
+
 void MapView::render(Renderer& renderer) {
     if (castles_.empty()) return;
 
@@ -269,13 +436,15 @@ void MapView::render(Renderer& renderer) {
     float screen_cx = w * 0.5f;
     float screen_cy = h * 0.5f;
 
+    ImDrawList* bg_draw = ImGui::GetBackgroundDrawList();
+    ImDrawList* fg_draw = ImGui::GetForegroundDrawList();
+
     // --- Render region backgrounds first ---
     if (show_regions_) {
-        ImDrawList* draw = ImGui::GetBackgroundDrawList();
         for (const auto& region : regions_) {
             if (region.castle_indices.size() < 2) continue;
 
-            // Compute convex hull-ish center for the region
+            // Compute region center
             ImVec2 center{0, 0};
             int count = 0;
             for (uint32_t ci : region.castle_indices) {
@@ -288,101 +457,174 @@ void MapView::render(Renderer& renderer) {
             center.x /= count;
             center.y /= count;
 
-            // Draw a filled circle for the region
             ImVec4 col_vec{region.color.x, region.color.y, region.color.z, region.color.w};
             ImU32 col = ImGui::ColorConvertFloat4ToU32(col_vec);
             ImVec2 center_im{center.x, center.y};
-            draw->AddCircleFilled(center_im, 60.0f * camera_.zoom, col, 12);
+            float region_radius = 70.0f * camera_.zoom;
+            bg_draw->AddCircleFilled(center_im, region_radius, col, 12);
         }
     }
 
     // --- Render routes ---
     if (show_routes_) {
-        ImDrawList* draw = ImGui::GetBackgroundDrawList();
-        ImU32 route_col = IM_COL32(100, 100, 100, 120);
         for (const auto& r : routes_) {
-            const auto& ca = castles_[r.from];
-            const auto& cb = castles_[r.to];
-            auto pa = map_to_screen(ca.x, ca.y);
-            auto pb = map_to_screen(cb.x, cb.y);
-            pa.x += screen_cx; pa.y += screen_cy;
-            pb.x += screen_cx; pb.y += screen_cy;
-            ImVec2 pa_im{pa.x, pa.y};
-            ImVec2 pb_im{pb.x, pb.y};
-            draw->AddLine(pa_im, pb_im, route_col, 1.5f);
+            draw_route(bg_draw, r, screen_cx, screen_cy);
         }
     }
 
     // --- Render castle markers ---
-    // Use a shared white texture for markers
-    static std::shared_ptr<Renderer::Texture> white_tex;
-    if (!white_tex) {
-        Renderer::TextureCreateInfo ti{};
-        ti.width = 1;
-        ti.height = 1;
-        ti.format = Renderer::TextureCreateInfo::Format::R8G8B8A8_UNORM;
-        uint8_t white[4] = {255, 255, 255, 255};
-        ti.initial_data = white;
-        ti.data_size = 4;
-        white_tex = renderer.create_texture(ti);
-    }
-
-    // We need a SpriteRenderer to draw. For now use ImDrawList directly
-    // for castle markers since SpriteRenderer setup is complex.
-    ImDrawList* draw = ImGui::GetBackgroundDrawList();
-
     for (auto& cp : castles_) {
         auto p = map_to_screen(cp.x, cp.y);
         p.x += screen_cx;
         p.y += screen_cy;
 
         // Skip if off-screen
-        if (p.x < -50 || p.x > w + 50 || p.y < -50 || p.y > h + 50) continue;
+        if (p.x < -100 || p.x > w + 100 || p.y < -100 || p.y > h + 100) continue;
 
-        float size = 8.0f * camera_.zoom;
-        ImVec2 center{p.x, p.y};
-        ImU32 col = cp.selected
-            ? IM_COL32(255, 200, 50, 255)   // selected: gold
-            : (cp.hovered ? IM_COL32(255, 255, 255, 255)  // hovered: white
-                          : IM_COL32(150, 150, 255, 255)); // normal: light blue
-
-        draw->AddCircleFilled(center, size, col, 10);
-        draw->AddCircle(center, size + 1.0f, IM_COL32(0, 0, 0, 150), 10, 1.5f);
+        float size = 16.0f * camera_.zoom;
+        draw_castle_sprite(fg_draw, cp, p.x, p.y, size);
     }
 
-    // --- Render castle names ---
-    if (show_names_) {
-        ImDrawList* draw = ImGui::GetForegroundDrawList();
-        for (const auto& cp : castles_) {
-            auto p = map_to_screen(cp.x, cp.y);
-            p.x += screen_cx;
-            p.y += screen_cy - 12.0f;  // Offset above marker
-
-            if (p.x < -100 || p.x > w + 100 || p.y < -100 || p.y > h + 100)
-                continue;
-
-            // Truncate long names
-            std::string label = cp.name_utf8;
-            if (label.size() > 12) label = label.substr(0, 12) + "..";
-
-            draw->AddText(nullptr, 12.0f, ImVec2{p.x - 30.0f, p.y - 6.0f},
-                          IM_COL32(255, 255, 255, 230), label.c_str());
-        }
-    }
-
-    // --- Render selected castle highlight ---
+    // --- Render selected castle highlight (halo) ---
     if (selected_) {
         for (const auto& cp : castles_) {
             if (cp.index == *selected_) {
                 auto p = map_to_screen(cp.x, cp.y);
                 p.x += screen_cx;
                 p.y += screen_cy;
-                draw->AddCircle({p.x, p.y}, 18.0f * camera_.zoom,
-                                IM_COL32(255, 255, 0, 100), 20, 3.0f);
+                // Pulsing halo
+                float pulse = 1.0f + 0.3f * std::sinf(ImGui::GetTime() * 4.0f);
+                float halo_size = 22.0f * camera_.zoom * pulse;
+                fg_draw->AddCircle({p.x, p.y}, halo_size,
+                                   IM_COL32(255, 255, 0, 80), 24, 3.0f);
                 break;
             }
         }
     }
+
+    // --- Render castle names ---
+    if (show_names_) {
+        for (const auto& cp : castles_) {
+            auto p = map_to_screen(cp.x, cp.y);
+            p.x += screen_cx;
+            p.y += screen_cy - 14.0f;  // Offset above marker
+
+            if (p.x < -150 || p.x > w + 150 || p.y < -150 || p.y > h + 150)
+                continue;
+
+            // Truncate long names
+            std::string label = cp.name_utf8;
+            if (label.size() > 14) label = label.substr(0, 14) + "..";
+
+            // Add level indicator
+            if (cp.level > 1) {
+                label += fmt::format(" Lv.{}", cp.level);
+            }
+
+            ImU32 name_col = cp.selected
+                ? IM_COL32(255, 220, 100, 255)
+                : (cp.hovered ? IM_COL32(255, 255, 255, 240)
+                              : IM_COL32(220, 220, 220, 220));
+            fg_draw->AddText(static_cast<ImFont*>(nullptr), 12.0f,
+                             ImVec2{p.x - 40.0f, p.y - 6.0f},
+                             name_col, label.c_str());
+        }
+    }
+}
+
+void MapView::render_ui(Renderer& renderer) {
+    int w = renderer.get_width();
+    int h = renderer.get_height();
+
+    // --- Hover tooltip ---
+    if (auto hover = hovered_castle()) {
+        const CastlePos* cp = nullptr;
+        for (const auto& c : castles_) {
+            if (c.index == *hover) { cp = &c; break; }
+        }
+        if (cp) {
+            ImVec2 mouse = ImGui::GetMousePos();
+            ImGui::SetNextWindowPos({mouse.x + 15, mouse.y + 15}, ImGuiCond_Always);
+            ImGui::Begin("CastleTooltip", nullptr,
+                         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                         ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoBackground);
+            ImGui::TextColored(ImVec4(1, 1, 0, 1), "%s",
+                               cp->name_utf8.empty() ? cp->name.c_str()
+                                                     : cp->name_utf8.c_str());
+            ImGui::Separator();
+            ImGui::Text("Region: %u", cp->region_id);
+            ImGui::Text("Level: %d", cp->level);
+            ImGui::Text("Garrison: %d/%d", cp->garrison, cp->max_garrison);
+            ImGui::Text("Gold: %d  Food: %d", cp->gold, cp->food);
+            ImGui::Separator();
+            ImGui::Text("Facilities:");
+            ImGui::Text("  Wall: %s", cp->has_wall ? "Yes" : "No");
+            ImGui::Text("  Barracks: %s", cp->has_barracks ? "Yes" : "No");
+            ImGui::Text("  Storehouse: %s", cp->has_storehouse ? "Yes" : "No");
+            ImGui::Text("  Market: %s", cp->has_market ? "Yes" : "No");
+            ImGui::End();
+        }
+    }
+
+    // --- Selected castle detail panel ---
+    if (selected_) {
+        const CastlePos* cp = nullptr;
+        for (const auto& c : castles_) {
+            if (c.index == *selected_) { cp = &c; break; }
+        }
+        if (cp) {
+            ImGui::SetNextWindowPos({10, 10}, ImGuiCond_Always);
+            ImGui::SetNextWindowSize({340, 420}, ImGuiCond_Always);
+            ImGui::Begin("Castle Details", nullptr,
+                         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+            ImGui::TextColored(ImVec4(1, 1, 0, 1), "%s",
+                               cp->name_utf8.empty() ? cp->name.c_str()
+                                                     : cp->name_utf8.c_str());
+            ImGui::Separator();
+            ImGui::Text("Region: %u", cp->region_id);
+            ImGui::Text("Level: %d", cp->level);
+            ImGui::Text("Position: (%.0f, %.0f)", cp->x, cp->y);
+            ImGui::Separator();
+            ImGui::Text("Garrison: %d/%d", cp->garrison, cp->max_garrison);
+            ImGui::Text("Gold: %d", cp->gold);
+            ImGui::Text("Food: %d", cp->food);
+            ImGui::Separator();
+            ImGui::Text("Facilities:");
+            ImGui::Text("  Wall: %s", cp->has_wall ? "Yes" : "No");
+            ImGui::Text("  Barracks: %s", cp->has_barracks ? "Yes" : "No");
+            ImGui::Text("  Storehouse: %s", cp->has_storehouse ? "Yes" : "No");
+            ImGui::Text("  Market: %s", cp->has_market ? "Yes" : "No");
+            ImGui::Separator();
+
+            if (ImGui::Button("Castle Commands", {-1, 0})) {
+                request_castle_command = true;
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Start Battle", {-1, 0})) {
+                request_battle = true;
+            }
+
+            ImGui::End();
+        }
+    }
+
+    // --- Camera info ---
+    ImGui::SetNextWindowPos({w - 200, 10}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({190, 80}, ImGuiCond_Always);
+    ImGui::Begin("Camera", nullptr,
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                 ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Text("Zoom: %.2fx", camera_.zoom);
+    ImGui::Text("Pos: (%.0f, %.0f)", camera_.x, camera_.y);
+    ImGui::Separator();
+    ImGui::Text("WASD/Arrows: Pan");
+    ImGui::Text("Scroll: Zoom");
+    ImGui::Text("Home: Reset");
+    ImGui::End();
 }
 
 bool MapView::handle_click(float mx, float my, Renderer& renderer) {
@@ -395,7 +637,7 @@ bool MapView::handle_click(float mx, float my, Renderer& renderer) {
         float dx = cp.x - map_pos.x;
         float dy = cp.y - map_pos.y;
         float dist = dx * dx + dy * dy;
-        float threshold = 10.0f / camera_.zoom;
+        float threshold = 12.0f / camera_.zoom;
         if (dist < threshold * threshold && dist < best_dist) {
             best_dist = dist;
             best_idx = cp.index;

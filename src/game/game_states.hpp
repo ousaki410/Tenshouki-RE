@@ -88,6 +88,12 @@ private:
     bool init_done_ = false;
     int selected_unit_id_ = -1;   // Currently selected unit ID
     bool show_move_range_ = false; // Show movement range highlight
+    // Cells reachable by selected unit (for movement range highlight)
+    std::vector<std::pair<int32_t, int32_t>> movable_cells_;
+    // Cells with enemies in attack range (for attack highlight)
+    std::vector<std::pair<int32_t, int32_t>> attackable_cells_;
+    // Battle log messages
+    std::vector<std::string> battle_log_;
 };
 
 } // namespace tensyoki

@@ -183,9 +183,9 @@ int32_t BattleStateData::roll_damage(int32_t attack, int32_t defense) const {
     return std::max(0, base);
 }
 
-bool BattleStateData::attack(BattleUnit& attacker, BattleUnit& defender) {
-    if (attacker.has_acted) return false;
-    if (defender.is_dead()) return false;
+int32_t BattleStateData::attack(BattleUnit& attacker, BattleUnit& defender) {
+    if (attacker.has_acted) return 0;
+    if (defender.is_dead()) return 0;
 
     int32_t dmg = roll_damage(attacker.attack, defender.defense +
                               defense_bonus(defender.grid_x, defender.grid_y));
@@ -215,7 +215,7 @@ bool BattleStateData::attack(BattleUnit& attacker, BattleUnit& defender) {
             result_ = BattleResult::PlayerVictory;
         }
     }
-    return true;
+    return dmg;
 }
 
 bool BattleStateData::is_in_attack_range(int32_t ax, int32_t ay,

@@ -93,12 +93,33 @@ void MapViewState::enter() {
 
 bool MapViewState::update(float dt) {
     map_view_.update(dt, *ctx_.renderer);
+
+    // Sync castle data from castle_command (facilities, garrison, etc.)
+    if (ctx_.sndata) {
+        map_view_.update_castle_data(ctx_.castle_command);
+    }
+
+    // Process UI request flags from map_view_
+    if (map_view_.request_castle_command) {
+        map_view_.clear_requests();
+        auto sel = map_view_.selected_castle();
+        if (sel) {
+            ctx_.selected_castle_id = *sel;
+            ctx_.pending_push = GameContext::PendingState::CastleCommand;
+        }
+    }
+    if (map_view_.request_battle) {
+        map_view_.clear_requests();
+        ctx_.pending_push = GameContext::PendingState::Battle;
+    }
+
     return true;
 }
 
 void MapViewState::render() {
     if (!init_done_ && ctx_.renderer && ctx_.sndata && ctx_.tex_cache) {
-        if (map_view_.init(*ctx_.sndata, *ctx_.tex_cache, *ctx_.renderer)) {
+        if (map_view_.init(*ctx_.sndata, *ctx_.tex_cache, *ctx_.renderer,
+                           ctx_.grp_archive.get())) {
             init_done_ = true;
             LOG_INFO("MapViewState: map initialized");
         }
@@ -126,57 +147,17 @@ void MapViewState::render() {
     // Handle mouse clicks on the map
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         ImVec2 mouse = ImGui::GetMousePos();
-        if (map_view_.handle_click(mouse.x, mouse.y, *ctx_.renderer)) {
-            // Castle selected - show command options via context
-            auto sel = map_view_.selected_castle();
-            if (sel) {
-                // Find castle index from map
-                for (const auto& c : map_view_.castles()) {
-                    if (c.index == *sel) {
-                        // Store selected castle for command menu
-                        // We'll show a small popup menu
-                        ImGui::OpenPopup("CastleContext");
-                    }
-                }
-            }
-        }
-    }
-
-    // Castle context popup
-    if (ImGui::BeginPopup("CastleContext")) {
-        auto sel = map_view_.selected_castle();
-        if (sel) {
-            const CastlePos* cp = nullptr;
-            for (const auto& c : map_view_.castles()) {
-                if (c.index == *sel) { cp = &c; break; }
-            }
-            if (cp) {
-                ImGui::Text("Castle: %s",
-                            cp->name_utf8.empty() ? cp->name.c_str()
-                                                  : cp->name_utf8.c_str());
-                ImGui::Separator();
-                if (ImGui::Button("View Details")) {
-                    ctx_.pending_push = GameContext::PendingState::CastleCommand;
-                    // Store selected castle index in context
-                    // We need to pass it somehow - for now use selected_castle_
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Battle")) {
-                    ctx_.pending_push = GameContext::PendingState::Battle;
-                }
-                if (ImGui::Button("Close")) {
-                    ImGui::CloseCurrentPopup();
-                }
-            }
-        }
-        ImGui::EndPopup();
+        map_view_.handle_click(mouse.x, mouse.y, *ctx_.renderer);
     }
 
     ImGui::End();
 
-    // Render castle info panel
+    // Render UI overlays (tooltips, castle details, camera info)
+    map_view_.render_ui(*ctx_.renderer);
+
+    // Render castle info panel (date, stats, selected castle summary)
     ImGui::SetNextWindowPos({10, 10}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({340, 500}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({340, 420}, ImGuiCond_Always);
     ImGui::Begin("Map Info", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
@@ -219,20 +200,11 @@ void MapViewState::render() {
             if (shown == 0) {
                 ImGui::TextDisabled("  (no officers assigned)");
             }
-
-            ImGui::Separator();
-            if (ImGui::Button("Castle Commands")) {
-                ctx_.selected_castle_id = *sel;
-                ctx_.pending_push = GameContext::PendingState::CastleCommand;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Battle")) {
-                ctx_.pending_push = GameContext::PendingState::Battle;
-            }
         }
     } else {
         ImGui::Text("Click on a castle to select");
     }
+    ImGui::End();
 }
 
 // ===========================================================================
@@ -480,6 +452,83 @@ void BattleState::enter() {
 
 bool BattleState::update(float dt) {
     (void)dt;
+
+    // Recalculate movable cells when a unit is selected and move range is shown
+    if (show_move_range_ && selected_unit_id_ >= 0) {
+        movable_cells_.clear();
+        auto* unit = battle_data_.get_unit_at(0, 0);  // dummy
+        for (auto& u : battle_data_.units()) {
+            if (u.id == (uint32_t)selected_unit_id_) {
+                unit = &u;
+                break;
+            }
+        }
+        if (unit && !unit->has_acted && unit->move_left > 0) {
+            // Find all reachable cells using BFS limited by move_left
+            int32_t gx = unit->grid_x;
+            int32_t gy = unit->grid_y;
+            int32_t max_cost = unit->move_left;
+
+            // BFS from unit position
+            std::vector<std::vector<bool>> visited(
+                battle_data_.grid_height(),
+                std::vector<bool>(battle_data_.grid_width(), false));
+            std::vector<std::vector<int32_t>> cost_so_far(
+                battle_data_.grid_height(),
+                std::vector<int32_t>(battle_data_.grid_width(), 99999));
+            std::vector<std::pair<int32_t, int32_t>> queue;
+            queue.push_back({gx, gy});
+            visited[gy][gx] = true;
+            cost_so_far[gy][gx] = 0;
+
+            size_t qi = 0;
+            while (qi < queue.size()) {
+                auto [cx, cy] = queue[qi++];
+                const int dx[4] = {0, 1, 0, -1};
+                const int dy[4] = {-1, 0, 1, 0};
+                for (int i = 0; i < 4; ++i) {
+                    int32_t nx = cx + dx[i];
+                    int32_t ny = cy + dy[i];
+                    if (!battle_data_.is_valid_position(nx, ny)) continue;
+                    if (!battle_data_.is_position_empty(nx, ny)) continue;
+                    int32_t move_cost = battle_data_.movement_cost(nx, ny);
+                    int32_t new_cost = cost_so_far[cy][cx] + move_cost;
+                    if (new_cost > max_cost) continue;
+                    if (visited[ny][nx]) continue;
+                    visited[ny][nx] = true;
+                    cost_so_far[ny][nx] = new_cost;
+                    queue.push_back({nx, ny});
+                    movable_cells_.push_back({nx, ny});
+                }
+            }
+        }
+    }
+
+    // Recalculate attackable cells
+    attackable_cells_.clear();
+    if (selected_unit_id_ >= 0) {
+        auto* unit = battle_data_.get_unit_at(0, 0);
+        for (auto& u : battle_data_.units()) {
+            if (u.id == (uint32_t)selected_unit_id_) {
+                unit = &u;
+                break;
+            }
+        }
+        if (unit && !unit->has_acted) {
+            // Check all 4 adjacent cells for enemies
+            const int dx[4] = {0, 1, 0, -1};
+            const int dy[4] = {-1, 0, 1, 0};
+            for (int i = 0; i < 4; ++i) {
+                int32_t tx = unit->grid_x + dx[i];
+                int32_t ty = unit->grid_y + dy[i];
+                auto* target = battle_data_.get_unit_at(tx, ty);
+                if (target && !target->is_dead() && target->is_player != unit->is_player) {
+                    attackable_cells_.push_back({tx, ty});
+                }
+            }
+        }
+    }
+
     return true;
 }
 
@@ -523,7 +572,35 @@ void BattleState::render() {
     float screen_cy = win_pos.y + win_size.y * 0.5f;
     float cell_size = 40.0f;
 
-    // Render terrain
+    // --- Render movement range highlight ---
+    if (show_move_range_ && selected_unit_id_ >= 0) {
+        for (const auto& [mx, my] : movable_cells_) {
+            float sx = (float)mx * cell_size + screen_cx -
+                       (float)battle_data_.grid_width() / 2.0f * cell_size;
+            float sy = (float)my * cell_size + screen_cy -
+                       (float)battle_data_.grid_height() / 2.0f * cell_size;
+            draw->AddRectFilled({sx, sy}, {sx + cell_size, sy + cell_size},
+                                IM_COL32(100, 255, 100, 60));
+            draw->AddRect({sx, sy}, {sx + cell_size, sy + cell_size},
+                          IM_COL32(100, 255, 100, 150), 0.0f, 0, 1.0f);
+        }
+    }
+
+    // --- Render attack range highlight ---
+    if (selected_unit_id_ >= 0) {
+        for (const auto& [ax, ay] : attackable_cells_) {
+            float sx = (float)ax * cell_size + screen_cx -
+                       (float)battle_data_.grid_width() / 2.0f * cell_size;
+            float sy = (float)ay * cell_size + screen_cy -
+                       (float)battle_data_.grid_height() / 2.0f * cell_size;
+            draw->AddRectFilled({sx, sy}, {sx + cell_size, sy + cell_size},
+                                IM_COL32(255, 100, 100, 80));
+            draw->AddRect({sx, sy}, {sx + cell_size, sy + cell_size},
+                          IM_COL32(255, 100, 100, 200), 0.0f, 0, 2.0f);
+        }
+    }
+
+    // --- Render terrain ---
     for (int32_t y = 0; y < battle_data_.grid_height(); ++y) {
         for (int32_t x = 0; x < battle_data_.grid_width(); ++x) {
             auto& cell = battle_data_.get_terrain(x, y);
@@ -547,7 +624,7 @@ void BattleState::render() {
         }
     }
 
-    // Render units
+    // --- Render units ---
     for (auto& unit : battle_data_.units()) {
         if (unit.is_dead()) continue;
 
@@ -561,6 +638,15 @@ void BattleState::render() {
         ImU32 unit_col = unit.is_player
                              ? IM_COL32(100, 200, 100, 255)  // Player: green
                              : IM_COL32(200, 100, 100, 255);  // Enemy: red
+
+        // Dim units that have acted
+        if (unit.has_acted) {
+            unit_col = IM_COL32(
+                (unit_col >> 24) & 0xFF,
+                ((unit_col >> 16) & 0xFF) * 2 / 3,
+                ((unit_col >> 8) & 0xFF) * 2 / 3,
+                (unit_col & 0xFF) * 2 / 3);
+        }
 
         if (unit.id == (uint32_t)selected_unit_id_) {
             // Selection highlight
@@ -580,13 +666,46 @@ void BattleState::render() {
                       {sx + cell_size * 0.3f, sy - cell_size * 0.5f},
                       IM_COL32(255, 255, 255, 150), 0.0f, 0, 1.0f);
 
+        // Move left indicator
+        if (unit.is_player && !unit.has_acted && unit.move_left > 0) {
+            float mv_pct = (float)unit.move_left / (float)unit.move;
+            draw->AddRectFilled({sx - cell_size * 0.3f, sy - cell_size * 0.55f},
+                                {sx - cell_size * 0.3f + cell_size * 0.6f * mv_pct,
+                                 sy - cell_size * 0.5f},
+                                IM_COL32(0, 200, 255, 180));
+        }
+
         // Unit label
-        draw->AddText(nullptr, 10.0f,
+        draw->AddText(static_cast<ImFont*>(nullptr), 10.0f,
                       {sx - cell_size * 0.3f, sy + cell_size * 0.4f},
                       IM_COL32(255, 255, 255, 230), unit.name.c_str());
     }
 
-    // UI panel on right
+    // --- Render battle result ---
+    if (battle_data_.result() != BattleResult::Ongoing) {
+        const char* result_text;
+        ImU32 result_col;
+        switch (battle_data_.result()) {
+            case BattleResult::PlayerVictory:
+                result_text = "VICTORY";
+                result_col = IM_COL32(100, 255, 100, 255);
+                break;
+            case BattleResult::PlayerDefeat:
+                result_text = "DEFEAT";
+                result_col = IM_COL32(255, 100, 100, 255);
+                break;
+            default:
+                result_text = "DRAW";
+                result_col = IM_COL32(255, 255, 100, 255);
+                break;
+        }
+        draw->AddText(static_cast<ImFont*>(nullptr), 24.0f,
+                      {win_pos.x + win_size.x * 0.5f - 60.0f,
+                       win_pos.y + win_size.y * 0.5f - 12.0f},
+                      result_col, result_text);
+    }
+
+    // --- UI panel on right ---
     ImGui::SetWindowPos({win_size.x - 320, 0}, ImGuiCond_Always);
     ImGui::SetWindowSize({320, win_size.y}, ImGuiCond_Always);
     ImGui::Begin("Battle Info", nullptr,
@@ -598,8 +717,7 @@ void BattleState::render() {
     ImGui::Separator();
 
     if (selected_unit_id_ >= 0) {
-        auto* unit = battle_data_.get_unit_at(0, 0);  // dummy
-        // Find selected unit
+        BattleUnit* unit = nullptr;
         for (auto& u : battle_data_.units()) {
             if (u.id == (uint32_t)selected_unit_id_) {
                 unit = &u;
@@ -614,19 +732,27 @@ void BattleState::render() {
             ImGui::Separator();
 
             if (!unit->has_acted && unit->move_left > 0) {
-                if (ImGui::Button("Move")) {
+                if (ImGui::Button("Move Range", {-1, 0})) {
                     show_move_range_ = !show_move_range_;
                 }
             }
             if (!unit->has_acted) {
-                if (ImGui::Button("Attack")) {
+                if (ImGui::Button("Attack Mode", {-1, 0})) {
                     // Attack mode - handled in click
+                }
+                ImGui::SameLine();
+                if (!attackable_cells_.empty()) {
+                    ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1),
+                                       "(%zu enemies in range)",
+                                       attackable_cells_.size());
                 }
             }
             if (ImGui::Button("End Turn")) {
                 battle_data_.next_turn();
                 selected_unit_id_ = -1;
                 show_move_range_ = false;
+                movable_cells_.clear();
+                attackable_cells_.clear();
             }
         }
     } else {
@@ -637,7 +763,21 @@ void BattleState::render() {
     }
 
     ImGui::Separator();
-    if (ImGui::Button("Return to Map")) {
+
+    // Battle log
+    ImGui::Text("Battle Log:");
+    ImGui::BeginChild("BattleLog", ImVec2(0, 150), true);
+    for (const auto& log_msg : battle_log_) {
+        ImGui::TextUnformatted(log_msg.c_str());
+    }
+    // Auto-scroll to bottom
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 5.0f) {
+        ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::EndChild();
+
+    ImGui::Separator();
+    if (ImGui::Button("Return to Map", {-1, 0})) {
         ctx_.request_pop = true;
     }
 
@@ -671,15 +811,22 @@ void BattleState::render() {
                 if (attacker && !attacker->has_acted &&
                     battle_data_.is_in_attack_range(attacker->grid_x,
                                                     attacker->grid_y, gx, gy)) {
-                    battle_data_.attack(*attacker, *unit);
+                    int dmg = battle_data_.attack(*attacker, *unit);
+                    if (dmg > 0) {
+                        battle_log_.push_back(fmt::format(
+                            "{} attacks {} for {} dmg! {} HP remaining",
+                            attacker->name, unit->name, dmg, unit->hp));
+                    }
                     attacker->has_acted = true;
                     attacker->move_left = 0;
                     selected_unit_id_ = -1;
                     show_move_range_ = false;
+                    movable_cells_.clear();
+                    attackable_cells_.clear();
                 }
             }
         } else if (selected_unit_id_ >= 0) {
-            // Try to move selected unit
+            // Try to move selected unit to clicked cell
             auto* attacker = battle_data_.get_unit_at(0, 0);
             for (auto& u : battle_data_.units()) {
                 if (u.id == (uint32_t)selected_unit_id_) {
@@ -690,16 +837,27 @@ void BattleState::render() {
             if (attacker && !attacker->has_acted &&
                 attacker->move_left > 0 &&
                 battle_data_.is_position_empty(gx, gy)) {
-                int32_t dist = std::abs(attacker->grid_x - gx) +
-                               std::abs(attacker->grid_y - gy);
-                int32_t cost = battle_data_.movement_cost(gx, gy);
-                if (dist == 1 && cost <= attacker->move_left) {
-                    // Move unit
+                // Check if cell is in movable range
+                bool can_move = false;
+                for (const auto& [mx, my] : movable_cells_) {
+                    if (mx == gx && my == gy) {
+                        can_move = true;
+                        break;
+                    }
+                }
+                if (can_move) {
+                    // Move unit (single step for now)
                     terrain_grid_cell_update(battle_data_, attacker, gx, gy);
+                    int32_t cost = battle_data_.movement_cost(gx, gy);
                     attacker->move_left -= cost;
                     if (attacker->move_left <= 0) {
                         attacker->has_acted = true;
                     }
+                    show_move_range_ = false;
+                    movable_cells_.clear();
+                    attackable_cells_.clear();
+                    battle_log_.push_back(fmt::format(
+                        "{} moved to ({}, {})", attacker->name, gx, gy));
                 }
             }
         }
