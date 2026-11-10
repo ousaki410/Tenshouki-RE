@@ -872,18 +872,37 @@ private:
                 ImGui::PopStyleColor();
 
                 if (ImGui::Button("Compile this shader")) {
-                    ShaderCompiler::CompileOptions opts;
-                    opts.stage = info.is_pixel_shader
-                                     ? ShaderCompiler::ShaderStage::Fragment
-                                     : ShaderCompiler::ShaderStage::Vertex;
-                    opts.source_lang = ShaderCompiler::SourceLanguage::GLSL;
-                    opts.target_lang = ShaderCompiler::TargetLanguage::GLSL;
-                    auto result = shader_compiler_->compile(glsl, opts);
-                    if (result.success) {
-                        LOG_INFO("Shader {} compiled OK", info.entry_index);
+                    // Generate GLSL from the D3D9 bytecode
+                    auto glsl = shader_compiler_->generate_glsl_from_d3d9(info);
+                    if (!glsl.empty()) {
+                        // Pair the generated fragment shader with a simple pass-through vertex shader
+                        const char* vertex_glsl = R"(
+#version 450 core
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in vec4 a_color;
+layout(location = 2) in vec2 a_uv;
+out vec4 vColor;
+out vec2 vTexCoord;
+uniform mat4 u_projection;
+void main() {
+    gl_Position = u_projection * vec4(a_pos, 0.0, 1.0);
+    vColor = a_color;
+    vTexCoord = a_uv;
+}
+)";
+                        auto shader = renderer_->create_shader_from_glsl(vertex_glsl, glsl);
+                        if (shader) {
+                            LOG_INFO("Shader entry {} ({}): created OpenGL program {}",
+                                     info.entry_index, info.profile, shader->get_id());
+                            // Store for later binding
+                            compiled_shader_ = shader;
+                        } else {
+                            LOG_WARN("Shader entry {} ({}): failed to create OpenGL program",
+                                     info.entry_index, info.profile);
+                        }
                     } else {
-                        LOG_WARN("Shader {} compile failed: {}",
-                                 info.entry_index, result.error_message);
+                        LOG_WARN("Shader entry {} ({}): could not generate GLSL",
+                                 info.entry_index, info.profile);
                     }
                 }
             } else {
@@ -1106,6 +1125,7 @@ private:
     std::unique_ptr<ShaderCompiler> shader_compiler_;
     std::vector<ShaderCompiler::D3D9ShaderInfo> shader_infos_;
     int selected_shader_ = -1;
+    std::shared_ptr<Renderer::Shader> compiled_shader_;
 
     // Scenario data (officers / castles)
     SndataArchive sndata_loaded_;

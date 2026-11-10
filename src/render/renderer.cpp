@@ -65,6 +65,7 @@ struct Renderer::Impl {
     GLuint blit_program_ = 0;
     GLuint blit_vao_ = 0;
     GLuint blit_vbo_ = 0;
+    GLuint current_program_ = 0;
 
     Impl() = default;
     ~Impl() {
@@ -237,16 +238,54 @@ std::shared_ptr<Renderer::Shader> Renderer::create_shader(ShaderStage, const std
     return nullptr;
 }
 
-void Renderer::bind_pipeline(std::shared_ptr<Pipeline>) {
-    // TODO: implement
+std::shared_ptr<Renderer::Shader> Renderer::create_shader_from_glsl(
+    const std::string& vertex_glsl,
+    const std::string& fragment_glsl) {
+
+    GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_glsl);
+    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, fragment_glsl);
+    if (!vs || !fs) {
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        return nullptr;
+    }
+
+    GLuint program = link_program(vs, fs);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    if (!program) {
+        return nullptr;
+    }
+
+    auto shader = std::make_shared<Shader>();
+    if (!shader->create(program)) {
+        glDeleteProgram(program);
+        return nullptr;
+    }
+    return shader;
 }
 
-void Renderer::bind_vertex_buffer(uint32_t, std::shared_ptr<Buffer>, uint32_t) {
-    // TODO: implement
+void Renderer::bind_pipeline(std::shared_ptr<Pipeline> pipeline) {
+    if (!pipeline) return;
+    // For now, Pipeline doesn't own a program; bind the default blit program.
+    // In the future, Pipeline can carry a Shader* and we bind its program.
+    if (impl_->blit_program_) {
+        glUseProgram(impl_->blit_program_);
+        impl_->current_program_ = impl_->blit_program_;
+        impl_->stats_.pipeline_binds++;
+    }
 }
 
-void Renderer::bind_index_buffer(std::shared_ptr<Buffer>, uint32_t) {
-    // TODO: implement
+void Renderer::bind_vertex_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset) {
+    if (!buffer) return;
+    glBindBuffer(GL_ARRAY_BUFFER, buffer->get_id());
+    impl_->stats_.pipeline_binds++;
+}
+
+void Renderer::bind_index_buffer(std::shared_ptr<Buffer> buffer, uint32_t offset) {
+    if (!buffer) return;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->get_id());
 }
 
 void Renderer::bind_texture(uint32_t slot, std::shared_ptr<Texture> texture) {

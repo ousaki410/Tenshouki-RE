@@ -404,6 +404,12 @@ public:
     std::shared_ptr<Pipeline> create_pipeline(const PipelineCreateInfo& info);
     std::shared_ptr<Shader> create_shader(ShaderStage stage, const std::vector<uint32_t>& spirv);
 
+    /// Create a shader program from GLSL vertex + fragment source.
+    /// Returns nullptr on failure.
+    std::shared_ptr<Shader> create_shader_from_glsl(
+        const std::string& vertex_glsl,
+        const std::string& fragment_glsl);
+
     // Bind resources
     void bind_pipeline(std::shared_ptr<Pipeline> pipeline);
     void bind_vertex_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset = 0);
