@@ -285,8 +285,19 @@ void CastleCommand::trigger_rebellion(uint32_t castle_index) {
     castle->loyalty = 50;
     castle->unrest = 30;
 
+    // Record rebellion event
+    RebellionEvent event;
+    event.castle_index = castle_index;
+    event.castle_name = castle->name_utf8.empty() ? castle->name : castle->name_utf8;
+    event.turn = current_turn_;
+    rebellion_events_.push_back(event);
+
     LOG_WARN("CastleCommand: CASTLE {} REBELLED! Castle is now independent.",
              castle_index);
+}
+
+void CastleCommand::advance_turn() {
+    current_turn_++;
 }
 
 int32_t CastleCommand::calculate_gold_income(const CastleData& castle) const {
@@ -315,6 +326,8 @@ int32_t CastleCommand::calculate_auto_defense(const CastleData& castle) const {
 }
 
 void CastleCommand::process_monthly_income() {
+    advance_turn();
+
     for (auto& castle : castles_) {
         if (!castle.is_player_owned) continue;  // Only process player-owned castles
 
@@ -495,6 +508,14 @@ std::string CastleCommand::get_officer_name(uint32_t officer_id) const {
         }
     }
     return "";
+}
+
+std::string CastleCommand::get_latest_rebellion_message() const {
+    if (rebellion_events_.empty()) return "";
+
+    const auto& latest = rebellion_events_.back();
+    return fmt::format("TURN {}: Castle {} ({}) REBELLED! It is now independent.",
+                       latest.turn, latest.castle_index, latest.castle_name);
 }
 
 } // namespace tensyoki

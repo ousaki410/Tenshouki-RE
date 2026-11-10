@@ -87,7 +87,8 @@ public:
 
     /// Initialize with parsed sndata (provides castle names/count)
     bool init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
-              Renderer& renderer, const BinArchive* grp_archive = nullptr);
+              Renderer& renderer, const BinArchive* grp_archive = nullptr,
+              const CastleCommand* castle_command = nullptr);
 
     /// Update castle data from castle_command (facilities, garrison, etc.)
     void update_castle_data(const CastleCommand& cmd);
@@ -231,6 +232,7 @@ private:
     GT1GTextureCache* tex_cache_ = nullptr;
     const BinArchive* grp_archive_ = nullptr;
     Renderer* renderer_ = nullptr;
+    const CastleCommand* castle_command_ = nullptr;  // for rebellion display
     // Shared white pixel texture for fallback markers
     std::shared_ptr<Renderer::Texture> white_tex_;
 };

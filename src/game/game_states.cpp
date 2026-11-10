@@ -208,7 +208,8 @@ bool MapViewState::update(float dt) {
 void MapViewState::render() {
     if (!init_done_ && ctx_.renderer && ctx_.sndata && ctx_.tex_cache) {
         if (map_view_.init(*ctx_.sndata, *ctx_.tex_cache, *ctx_.renderer,
-                           ctx_.grp_archive.get())) {
+                           ctx_.grp_archive.get(),
+                           &ctx_.castle_command)) {
             init_done_ = true;
             LOG_INFO("MapViewState: map initialized");
         }
@@ -329,6 +330,26 @@ void MapViewState::render() {
         // For simplicity, user will need to select Load Game from menu
     }
     ImGui::End();
+
+    // Rebellion events panel
+    auto& rebellion_events = ctx_.castle_command.rebellion_events();
+    if (!rebellion_events.empty()) {
+        ImGui::SetNextWindowPos({(float)ctx_.renderer->get_width() - 200, 350},
+                                ImGuiCond_Always);
+        ImGui::SetNextWindowSize({200, 150}, ImGuiCond_Always);
+        ImGui::Begin("Rebellion Events", nullptr,
+                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                         ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::TextColored(ImVec4(1, 0, 0, 1), "REBELLION ALERT!");
+        ImGui::Separator();
+        // Show last 3 rebellion events
+        int start = std::max(0, (int)rebellion_events.size() - 3);
+        for (size_t i = start; i < rebellion_events.size(); ++i) {
+            const auto& evt = rebellion_events[i];
+            ImGui::Text("Turn %d: %s revolted!", evt.turn, evt.castle_name.c_str());
+        }
+        ImGui::End();
+    }
 }
 
 // ===========================================================================
@@ -521,6 +542,29 @@ void CastleCommandState::render() {
                                   castle->lord_officer_id)
                                 .c_str()
                             : "(none)");
+            ImGui::Text("Loyalty: %d", castle->loyalty);
+            ImGui::SameLine();
+            // Loyalty bar
+            float loyalty_pct = static_cast<float>(castle->loyalty) / 100.0f;
+            ImGui::ProgressBar(loyalty_pct, ImVec2(0, 0));
+            ImGui::Text("Unrest: %d", castle->unrest);
+            ImGui::Separator();
+
+            // Tax rate adjustment
+            ImGui::Text("Tax Rate: %d%%", ctx_.castle_command.tax_rate());
+            ImGui::SameLine();
+            if (ImGui::Button("-10%##tax_down")) {
+                ctx_.castle_command.set_tax_rate(
+                    ctx_.castle_command.tax_rate() - 10);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("+10%##tax_up")) {
+                ctx_.castle_command.set_tax_rate(
+                    ctx_.castle_command.tax_rate() + 10);
+            }
+            ImGui::SameLine();
+            ImGui::Text("Higher tax = more gold, lower loyalty");
+
             ImGui::Separator();
 
             // Tab buttons for command groups

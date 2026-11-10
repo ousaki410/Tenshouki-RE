@@ -29,10 +29,12 @@ namespace tensyoki {
 MapView::MapView() = default;
 
 bool MapView::init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
-                   Renderer& renderer, const BinArchive* grp_archive) {
+                   Renderer& renderer, const BinArchive* grp_archive,
+                   const CastleCommand* castle_command) {
     tex_cache_ = &tex_cache;
     renderer_ = &renderer;
     grp_archive_ = grp_archive;
+    castle_command_ = castle_command;
 
     castles_.clear();
     castles_.reserve(sndata.castle_count());
@@ -514,6 +516,28 @@ void MapView::render(Renderer& renderer) {
                 ? IM_COL32(255, 0, 0, 220)  // Enemy: red
                 : IM_COL32(128, 128, 128, 220));  // Neutral: gray
         fg_draw->AddCircleFilled({p.x, p.y + size * 0.7f}, dot_size, owner_col, 6);
+
+        // Draw rebellion indicator (red pulsing circle above castle)
+        if (castle_command_) {
+            const auto& rebellion_events = castle_command_->rebellion_events();
+            for (const auto& evt : rebellion_events) {
+                if (evt.castle_index == cp.index) {
+                    // Show rebellion indicator for 5 turns
+                    int turns_since = castle_command_->get_turn_count() - evt.turn;
+                    if (turns_since >= 0 && turns_since < 5) {
+                        float pulse = 1.0f + 0.5f * std::sinf(ImGui::GetTime() * 6.0f);
+                        float rebel_size = size * 1.5f * pulse;
+                        fg_draw->AddCircle({p.x, p.y - size * 0.7f}, rebel_size,
+                                           IM_COL32(255, 0, 0, 150), 16, 2.0f);
+                        fg_draw->AddText(nullptr, 10.0f,
+                                         {p.x - 15.0f, p.y - size * 1.2f},
+                                         IM_COL32(255, 0, 0, 255),
+                                         "REBEL!");
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     // --- Render selected castle highlight (halo) ---

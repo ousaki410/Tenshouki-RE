@@ -158,6 +158,17 @@ public:
     // Get count of castles owned by player
     int32_t player_castle_count() const;
 
+    // Rebellion events
+    struct RebellionEvent {
+        uint32_t castle_index = 0;
+        std::string castle_name;
+        int32_t turn = 0;
+    };
+    const std::vector<RebellionEvent>& rebellion_events() const { return rebellion_events_; }
+
+    // Get rebellion message for UI display
+    std::string get_latest_rebellion_message() const;
+
     // Get castles owned by player in a specific region
     std::vector<uint32_t> get_player_castles_in_region(uint32_t region_id) const;
 
@@ -176,10 +187,18 @@ public:
     // Set all castle data (used for save/load)
     void set_castles_data(const std::vector<CastleData>& castles);
 
+    // Get current turn number
+    int32_t get_turn_count() const { return current_turn_; }
+
+    // Advance turn counter
+    void advance_turn();
+
 private:
     std::vector<CastleData> castles_;
     const SndataArchive* sndata_ = nullptr;  // not owned, set in init()
     int32_t castle_tax_rate_ = 50;  // Global tax rate 0-100
+    int32_t current_turn_ = 0;      // Current turn counter
+    std::vector<RebellionEvent> rebellion_events_;  // Rebellion history
 };
 
 } // namespace tensyoki
