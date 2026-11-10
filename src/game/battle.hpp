@@ -51,6 +51,22 @@ enum class SkillType {
     Guard,          // Temporary defense boost for self
     Inspire,        // Boost attack of adjacent allies
     RainOfArrows,   // Archer-only: damage all enemies in range 3
+    Silence,        // Enemy cannot use skills for 2 turns
+    Poison,         // Enemy takes damage each turn for 3 turns
+    Counterattack,  // Self: auto-counterattack when attacked for 2 turns
+};
+
+/// Status effect applied to a unit
+struct StatusEffect {
+    enum class Type {
+        None,
+        Silence,    // Cannot use skills
+        Poison,     // Take damage each turn
+        Counterattack, // Auto-counterattack when attacked
+    };
+    Type type = Type::None;
+    int32_t turns_remaining = 0;  // How many turns the effect lasts
+    int32_t damage_per_turn = 0;  // For Poison: damage each turn
 };
 
 /// Skill definition
@@ -97,7 +113,28 @@ struct BattleUnit {
     int32_t grid_x = 0;
     int32_t grid_y = 0;
 
+    // Status effects currently applied to this unit
+    std::vector<StatusEffect> status_effects;
+
     bool is_dead() const { return hp <= 0; }
+
+    // Check if unit has a specific status effect
+    bool has_status(StatusEffect::Type type) const {
+        for (const auto& se : status_effects) {
+            if (se.type == type) return true;
+        }
+        return false;
+    }
+
+    // Check if unit has Counterattack status
+    bool has_counterattack() const {
+        return has_status(StatusEffect::Type::Counterattack);
+    }
+
+    // Check if unit is silenced (cannot use skills)
+    bool is_silenced() const {
+        return has_status(StatusEffect::Type::Silence);
+    }
 
     // Get effective attack with morale bonus
     int32_t effective_attack() const {
@@ -165,6 +202,9 @@ public:
 
     // Initialize a test battle
     void init_battle();
+
+    // Initialize battle from castle data (map-to-battle linkage)
+    void init_from_castle(uint32_t castle_index, bool is_attacker);
 
     // Get unit at grid position (or null)
     BattleUnit* get_unit_at(int32_t x, int32_t y);
@@ -283,6 +323,16 @@ private:
 
     // Level up a unit
     void level_up(BattleUnit& unit);
+
+    // Apply a status effect to a unit
+    void apply_status_effect(BattleUnit& unit, StatusEffect::Type type,
+                             int32_t turns, int32_t damage_per_turn = 0);
+
+    // Process all status effects at turn start (poison damage, expiry)
+    void process_status_effects(BattleUnit& unit);
+
+    // Check if unit can counterattack when attacked
+    bool can_counterattack(const BattleUnit& unit) const;
 
     // AI helper: get mutable unit by ID
     BattleUnit* get_unit_by_id(uint32_t id);

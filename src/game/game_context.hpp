@@ -57,6 +57,9 @@ public:
     
     // Selected castle for commands
     uint32_t selected_castle_id = 0;
+    
+    // Target castle for battle (map-to-battle linkage)
+    std::optional<uint32_t> battle_target_castle;
 };
 
 } // namespace tensyoki

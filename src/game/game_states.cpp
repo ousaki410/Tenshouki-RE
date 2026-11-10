@@ -110,7 +110,12 @@ bool MapViewState::update(float dt) {
     }
     if (map_view_.request_battle) {
         map_view_.clear_requests();
-        ctx_.pending_push = GameContext::PendingState::Battle;
+        auto sel = map_view_.selected_castle();
+        if (sel) {
+            ctx_.selected_castle_id = *sel;
+            ctx_.battle_target_castle = *sel;
+            ctx_.pending_push = GameContext::PendingState::Battle;
+        }
     }
 
     return true;
@@ -588,7 +593,17 @@ BattleState::BattleState(GameContext& ctx) : ctx_(ctx) {}
 
 void BattleState::enter() {
     LOG_INFO("BattleState: enter");
-    battle_data_.init_battle();
+
+    // Check if we have a target castle for map-to-battle linkage
+    if (ctx_.battle_target_castle.has_value() && ctx_.sndata) {
+        battle_data_.init_from_castle(*ctx_.battle_target_castle, true);
+        LOG_INFO("BattleState: initialized from castle {}",
+                 *ctx_.battle_target_castle);
+        ctx_.battle_target_castle.reset();  // Consume the target
+    } else {
+        battle_data_.init_battle();
+    }
+
     init_done_ = true;
     selected_unit_id_ = -1;
     show_move_range_ = false;

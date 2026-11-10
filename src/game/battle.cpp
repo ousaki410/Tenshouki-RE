@@ -68,6 +68,27 @@ std::vector<BattleSkill> BattleUnit::get_available_skills() const {
                           true, true, 3});
     }
 
+    // Silence - available at level 4+, prevents enemy skill use
+    if (level >= 4) {
+        skills.push_back({SkillType::Silence, "Silence",
+                          "Enemy cannot use skills for 2 turns.", 25, 2,
+                          true, false, 2});
+    }
+
+    // Poison - available at level 5+, damage over time
+    if (level >= 5) {
+        skills.push_back({SkillType::Poison, "Poison",
+                          "Enemy takes damage each turn for 3 turns.", 20, 2,
+                          true, false, 2});
+    }
+
+    // Counterattack - available at level 3+, auto-attack when attacked
+    if (level >= 3) {
+        skills.push_back({SkillType::Counterattack, "Counterattack",
+                          "Auto-counterattack when attacked for 2 turns.", 15, 1,
+                          false, false, 1});
+    }
+
     return skills;
 }
 
@@ -218,6 +239,108 @@ void BattleStateData::init_battle() {
              units_.size());
 }
 
+void BattleStateData::init_from_castle(uint32_t castle_index, bool is_attacker) {
+    units_.clear();
+    terrain_grid_.assign(static_cast<size_t>(grid_width_) * grid_height_,
+                         TerrainCell{});
+
+    // Generate terrain
+    std::mt19937 rng(42 + castle_index);
+    std::uniform_int_distribution<int> terrain_roll(0, 99);
+
+    for (int32_t y = 0; y < grid_height_; ++y) {
+        for (int32_t x = 0; x < grid_width_; ++x) {
+            auto& cell = terrain_grid_[idx(x, y)];
+            int roll = terrain_roll(rng);
+            if (roll < 10) {
+                cell.type = TerrainType::Forest;
+            } else if (roll < 15) {
+                cell.type = TerrainType::Mountain;
+            } else if (roll < 20) {
+                cell.type = TerrainType::Water;
+            } else {
+                cell.type = TerrainType::Plain;
+            }
+        }
+    }
+
+    // Place castle in center for defender
+    int32_t cx = grid_width_ / 2;
+    int32_t cy = grid_height_ / 2;
+    terrain_grid_[idx(cx, cy)].type = TerrainType::Castle;
+
+    // Note: In a full implementation, we'd look up castle data from SndataArchive
+    // and officer data to create realistic units. For now, create units based
+    // on castle index as a seed.
+    int32_t seed = static_cast<int32_t>(castle_index);
+    int32_t garrison_size = 1 + (seed % 3);  // 1-3 defender units
+    int32_t attacker_size = 2;  // Player always brings 2 units
+
+    // Create defender units (castle garrison) - around castle
+    for (int32_t i = 0; i < garrison_size; ++i) {
+        BattleUnit u;
+        u.id = next_unit_id_++;
+        u.officer_id = 100 + seed * 10 + i;
+        u.name = "Defender " + std::to_string(i + 1);
+        u.is_player = false;
+        u.unit_type = static_cast<UnitType>(i % 3);
+        
+        // Scale stats by castle level (we don't have direct access, use seed)
+        int32_t level_bonus = seed % 5;
+        u.hp = u.max_hp = 90 + level_bonus * 10;
+        u.attack = 18 + level_bonus * 3;
+        u.defense = 12 + level_bonus * 2;
+        u.move = 3;
+        u.move_left = 3;
+        u.attack_range = (u.unit_type == UnitType::Archer) ? 3 : 1;
+        u.morale = 50 + (seed % 20);
+        
+        // Position around the castle
+        u.grid_x = cx + (i - garrison_size / 2);
+        u.grid_y = cy + 2;
+        if (u.grid_x < 0) u.grid_x = 0;
+        if (u.grid_x >= grid_width_) u.grid_x = grid_width_ - 1;
+        if (u.grid_y >= grid_height_) u.grid_y = grid_height_ - 1;
+        
+        units_.push_back(u);
+    }
+
+    // Create attacker units (player) - around left side
+    for (int32_t i = 0; i < attacker_size; ++i) {
+        BattleUnit u;
+        u.id = next_unit_id_++;
+        u.officer_id = 1 + i;
+        u.name = "Player Unit " + std::to_string(i + 1);
+        u.is_player = true;
+        u.unit_type = (i == 0) ? UnitType::Infantry : UnitType::Archer;
+        
+        u.hp = u.max_hp = 120;
+        u.attack = 25;
+        u.defense = 15;
+        u.move = 3;
+        u.move_left = 3;
+        u.attack_range = (u.unit_type == UnitType::Archer) ? 3 : 1;
+        u.morale = 60;
+        
+        u.grid_x = 3;
+        u.grid_y = grid_height_ / 2 + i * 2;
+        
+        units_.push_back(u);
+    }
+
+    // Register units on terrain grid
+    for (auto& u : units_) {
+        if (is_valid_position(u.grid_x, u.grid_y)) {
+            terrain_grid_[idx(u.grid_x, u.grid_y)].unit_id = u.id;
+        }
+    }
+
+    add_event("Battle started at castle " + std::to_string(castle_index) + "!", true);
+
+    LOG_INFO("BattleStateData: battle initialized from castle {} with {} units",
+             castle_index, units_.size());
+}
+
 BattleUnit* BattleStateData::get_unit_at(int32_t x, int32_t y) {
     if (!is_valid_position(x, y)) return nullptr;
     uint32_t uid = terrain_grid_[idx(x, y)].unit_id;
@@ -312,6 +435,27 @@ int32_t BattleStateData::attack(BattleUnit& attacker, BattleUnit& defender) {
     add_event(fmt::format("{} attacks {} for {} dmg! {} HP left",
                           attacker.name, defender.name, dmg, defender.hp),
               attacker.is_player, dmg);
+
+    // Counterattack: defender auto-attacks if has Counterattack status
+    if (defender.has_counterattack() && !defender.is_dead()) {
+        int32_t dist = std::abs(defender.grid_x - attacker.grid_x) +
+                       std::abs(defender.grid_y - attacker.grid_y);
+        if (dist <= 1) {
+            int32_t cdmg = roll_damage(defender.effective_attack(),
+                                       attacker.effective_defense() +
+                                       defense_bonus(attacker.grid_x, attacker.grid_y));
+            attacker.hp = std::max(0, attacker.hp - cdmg);
+            add_event(fmt::format("{} counterattacks {} for {} dmg!",
+                                  defender.name, attacker.name, cdmg),
+                      !defender.is_player, cdmg);
+            if (attacker.is_dead()) {
+                terrain_grid_[idx(attacker.grid_x, attacker.grid_y)].unit_id = 0;
+                add_event(fmt::format("{} defeated!", attacker.name),
+                          !attacker.is_player);
+                check_win_conditions();
+            }
+        }
+    }
 
     if (defender.is_dead()) {
         // Remove defender from terrain grid
@@ -456,6 +600,65 @@ void BattleStateData::build_settlement() {
     }
 }
 
+void BattleStateData::apply_status_effect(BattleUnit& unit, StatusEffect::Type type,
+                                           int32_t turns, int32_t damage_per_turn) {
+    // Remove existing effect of same type
+    unit.status_effects.erase(
+        std::remove_if(unit.status_effects.begin(), unit.status_effects.end(),
+                       [type](const StatusEffect& se) { return se.type == type; }),
+        unit.status_effects.end());
+
+    // Add new effect
+    StatusEffect se;
+    se.type = type;
+    se.turns_remaining = turns;
+    se.damage_per_turn = damage_per_turn;
+    unit.status_effects.push_back(se);
+
+    add_event(fmt::format("{} afflicted with {}!", unit.name,
+                          type == StatusEffect::Type::Silence ? "Silence" :
+                          type == StatusEffect::Type::Poison ? "Poison" :
+                          "Counterattack"),
+              false, 0, false);
+}
+
+void BattleStateData::process_status_effects(BattleUnit& unit) {
+    // Process Poison damage
+    if (unit.has_status(StatusEffect::Type::Poison)) {
+        int32_t poison_dmg = 15;  // Fixed poison damage per turn
+        unit.hp = std::max(0, unit.hp - poison_dmg);
+        add_event(fmt::format("{} takes {} poison damage! HP: {}",
+                              unit.name, poison_dmg, unit.hp),
+                  unit.is_player, poison_dmg, false);
+        if (unit.is_dead()) {
+            terrain_grid_[idx(unit.grid_x, unit.grid_y)].unit_id = 0;
+            add_event(fmt::format("{} succumbed to poison!", unit.name),
+                      unit.is_player);
+            check_win_conditions();
+        }
+    }
+
+    // Decrement turn counters and remove expired effects
+    auto it = unit.status_effects.begin();
+    while (it != unit.status_effects.end()) {
+        it->turns_remaining--;
+        if (it->turns_remaining <= 0) {
+            add_event(fmt::format("{}'s {} wore off.", unit.name,
+                                  it->type == StatusEffect::Type::Silence ? "Silence" :
+                                  it->type == StatusEffect::Type::Poison ? "Poison" :
+                                  "Counterattack"),
+                      unit.is_player, 0, false);
+            it = unit.status_effects.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+bool BattleStateData::can_counterattack(const BattleUnit& unit) const {
+    return unit.has_counterattack();
+}
+
 void BattleStateData::next_turn() {
     is_player_turn_ = !is_player_turn_;
 
@@ -468,6 +671,8 @@ void BattleStateData::next_turn() {
             u.move_left = u.move;
             // Morale slowly recovers at turn start
             u.morale = std::min(u.max_morale, u.morale + 5);
+            // Process status effects at start of unit's turn
+            process_status_effects(u);
         }
     }
 
@@ -531,6 +736,8 @@ int32_t BattleStateData::use_skill(BattleUnit& user, const BattleSkill& skill,
                                     int32_t tx, int32_t ty) {
     if (user.has_acted || user.used_skill) return 0;
     if (user.morale < skill.morale_cost) return 0;
+    // Silenced units cannot use skills
+    if (user.is_silenced()) return 0;
 
     // Check if target is in range
     if (!is_in_skill_range(user.grid_x, user.grid_y, tx, ty, skill)) return 0;
@@ -651,6 +858,39 @@ int32_t BattleStateData::use_skill(BattleUnit& user, const BattleSkill& skill,
             add_event(fmt::format("{} rains arrows on enemies!", user.name),
                       user.is_player, dmg, true);
             check_win_conditions();
+            break;
+        }
+        case SkillType::Silence: {
+            // Silence: enemy cannot use skills for 2 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player != user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::Silence, 2);
+                add_event(fmt::format("{} silences {}! No skills for 2 turns.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
+            break;
+        }
+        case SkillType::Poison: {
+            // Poison: enemy takes damage each turn for 3 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player != user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::Poison, 3, 15);
+                add_event(fmt::format("{} poisons {}! Damage each turn for 3 turns.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
+            break;
+        }
+        case SkillType::Counterattack: {
+            // Counterattack: auto-attack when attacked for 2 turns
+            BattleUnit* target = get_unit_at(tx, ty);
+            if (target && !target->is_dead() && target->is_player == user.is_player) {
+                apply_status_effect(*target, StatusEffect::Type::Counterattack, 2);
+                add_event(fmt::format("{} readies counterattack! Will retaliate when attacked.",
+                                      user.name, target->name),
+                          user.is_player, 0, true);
+            }
             break;
         }
         default:
