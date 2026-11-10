@@ -141,6 +141,8 @@ target_sources(tensyoki PRIVATE
     src/resource/bin_parser.cpp
     src/resource/grp_parser.cpp
     src/resource/dat_parser.cpp
+    src/resource/gt1g_decoder.cpp
+    src/resource/gt1g_texture_cache.cpp
     src/ui/imgui_backend.cpp
     src/ui/texture_atlas_viewer.hpp
 )

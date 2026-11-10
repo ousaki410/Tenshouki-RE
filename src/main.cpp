@@ -8,6 +8,7 @@
 #include "core/math_utils.hpp"
 #include "render/renderer.hpp"
 #include "resource/bin_parser.hpp"
+#include "resource/gt1g_texture_cache.hpp"
 #include "ui/imgui_backend.hpp"
 #include "ui/texture_atlas_viewer.hpp"
 #include "platform/platform.hpp"
@@ -387,6 +388,7 @@ private:
             
             if (ImGui::BeginMenu("Debug")) {
                 ImGui::MenuItem("Resource Browser", nullptr, &show_resource_browser_);
+                ImGui::MenuItem("Texture Viewer", nullptr, &show_texture_viewer_);
                 ImGui::MenuItem("Texture Atlas Viewer", nullptr, &show_atlas_viewer_);
                 ImGui::MenuItem("Shader Viewer", nullptr, &show_shader_viewer_);
                 ImGui::MenuItem("Data Table Viewer", nullptr, &show_dat_viewer_);
@@ -399,6 +401,11 @@ private:
         // Texture atlas viewer
         if (show_atlas_viewer_ && atlas_viewer_) {
             atlas_viewer_->draw();
+        }
+
+        // Texture viewer (GT1G previews)
+        if (show_texture_viewer_) {
+            render_texture_viewer();
         }
         
         // Resource browser
@@ -555,6 +562,19 @@ private:
                                           tex.index, tex.width, tex.height,
                                           tex.data_size, tex.data_offset);
                     }
+                    if (ImGui::Button("Preview Texture 0")) {
+                        preview_container_ = current_file_;
+                        preview_entry_index_ = entry.index;
+                        preview_texture_ = texture_cache_.get_or_load(
+                            *renderer_, preview_container_, archive, entry.index);
+                        if (preview_texture_) {
+                            // Need width/height from the decoded texture; store from first entry
+                            // We re-decode lightly to get dims, or just query the texture
+                            preview_width_ = nested->textures->textures[0].width;
+                            preview_height_ = nested->textures->textures[0].height;
+                            show_texture_viewer_ = true;
+                        }
+                    }
                 }
             } else {
                 ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Nested parse failed: %s",
@@ -635,6 +655,33 @@ private:
         }
     }
     
+    void render_texture_viewer() {
+        if (!preview_texture_) {
+            ImGui::Begin("Texture Viewer", &show_texture_viewer_);
+            ImGui::Text("No texture loaded. Select a GT1G entry in the Resource Browser");
+            ImGui::Text("and click 'Preview Texture 0'.");
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Begin("Texture Viewer", &show_texture_viewer_,
+                     ImGuiWindowFlags_AlwaysAutoResize);
+
+        ImGui::Text("Container: %s", preview_container_.c_str());
+        ImGui::Text("Entry: %u", preview_entry_index_);
+        ImGui::Text("Size: %ux%u", preview_width_, preview_height_);
+        ImGui::Separator();
+
+        // ImGui expects Y-down UVs; flip vertically for OpenGL textures
+        ImVec2 uv0(0, 1);
+        ImVec2 uv1(1, 0);
+        ImVec2 size((float)preview_width_, (float)preview_height_);
+        ImGui::Image(static_cast<ImTextureID>(preview_texture_->get_id()), size, uv0, uv1,
+                     ImVec4(1, 1, 1, 1), ImVec4(0, 0, 0, 0));
+
+        ImGui::End();
+    }
+
     bool extract_entry_to_disk(const BinArchive& archive, const BinFileEntry& entry) {
         auto result = archive.extract(entry);
         if (!result) {
@@ -691,12 +738,21 @@ private:
     bool show_shader_viewer_ = false;
     bool show_dat_viewer_ = false;
     bool show_atlas_viewer_ = false;
+    bool show_texture_viewer_ = false;
     bool check_resources_ = false;
     bool help_requested_ = false;
 
     std::unique_ptr<BinArchive> selected_archive_;
     const BinFileEntry* selected_entry_ = nullptr;
     std::string current_file_ = "res/res_grp.bin";
+
+    // Texture preview state
+    GT1GTextureCache texture_cache_;
+    std::shared_ptr<Renderer::Texture> preview_texture_;
+    int preview_width_ = 0;
+    int preview_height_ = 0;
+    std::string preview_container_;
+    uint32_t preview_entry_index_ = 0;
 };
 
 } // namespace tensyoki
