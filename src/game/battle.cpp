@@ -89,6 +89,62 @@ std::vector<BattleSkill> BattleUnit::get_available_skills() const {
                           false, false, 1});
     }
 
+    // Sleep - available at level 6+, enemy cannot act for 2 turns
+    if (level >= 6) {
+        skills.push_back({SkillType::Sleep, "Sleep",
+                          "Enemy cannot act for 2 turns.", 40, 2,
+                          true, false, 2});
+    }
+
+    // Slow - available at level 5+, enemy movement halved for 2 turns
+    if (level >= 5) {
+        skills.push_back({SkillType::Slow, "Slow",
+                          "Enemy movement halved for 2 turns.", 25, 2,
+                          true, false, 2});
+    }
+
+    // Weakness - available at level 4+, enemy attack reduced for 3 turns
+    if (level >= 4) {
+        skills.push_back({SkillType::Weakness, "Weakness",
+                          "Enemy attack reduced for 3 turns.", 20, 2,
+                          true, false, 3});
+    }
+
+    // ArmorBreak - available at level 5+, enemy defense reduced for 3 turns
+    if (level >= 5) {
+        skills.push_back({SkillType::ArmorBreak, "Armor Break",
+                          "Enemy defense reduced for 3 turns.", 30, 2,
+                          true, false, 3});
+    }
+
+    // Burn - available at level 7+, enemy takes fire damage for 3 turns
+    if (level >= 7) {
+        skills.push_back({SkillType::Burn, "Burn",
+                          "Enemy takes fire damage each turn for 3 turns.", 35, 2,
+                          true, false, 3});
+    }
+
+    // HealAll - Leader only, level 8+, heal all adjacent allies
+    if (level >= 8 && unit_type != UnitType::Archer) {
+        skills.push_back({SkillType::HealAll, "Heal All",
+                          "Heal all adjacent allies.", 60, 2,
+                          false, true, 2});
+    }
+
+    // InspireAll - Leader only, level 9+, boost morale of all allies
+    if (level >= 9 && unit_type != UnitType::Archer) {
+        skills.push_back({SkillType::InspireAll, "Inspire All",
+                          "Boost morale of all allies.", 50, 3,
+                          false, true, 3});
+    }
+
+    // TacticalRetreat - available at level 4+, move and gain defense
+    if (level >= 4) {
+        skills.push_back({SkillType::TacticalRetreat, "Tactical Retreat",
+                          "Move and gain defensive bonus.", 20, 3,
+                          false, false, 3});
+    }
+
     return skills;
 }
 
@@ -121,6 +177,9 @@ void BattleStateData::init_battle() {
     int32_t cx = grid_width_ / 2;
     int32_t cy = grid_height_ / 2;
     terrain_grid_[idx(cx, cy)].type = TerrainType::Castle;
+
+    // Initialize weather
+    change_weather();
 
     // Create player units (around left side)
     BattleUnit p1;
@@ -235,8 +294,8 @@ void BattleStateData::init_battle() {
 
     add_event("Battle started!", true);
 
-    LOG_INFO("BattleStateData: battle initialized with {} units",
-             units_.size());
+    LOG_INFO("BattleStateData: battle initialized with {} units, weather: {}",
+             units_.size(), weather_);
 }
 
 void BattleStateData::init_from_castle(uint32_t castle_index, bool is_attacker) {
@@ -381,14 +440,17 @@ bool BattleStateData::is_position_empty(int32_t x, int32_t y) const {
 int32_t BattleStateData::movement_cost(int32_t x, int32_t y) const {
     if (!is_valid_position(x, y)) return 999;
     auto t = terrain_grid_[idx(x, y)].type;
+    int32_t cost = 1;
     switch (t) {
-        case TerrainType::Plain:    return 1;
-        case TerrainType::Forest:   return 2;
-        case TerrainType::Mountain: return 3;
-        case TerrainType::Water:    return 4;
-        case TerrainType::Castle:   return 1;
+        case TerrainType::Plain:    cost = 1; break;
+        case TerrainType::Forest:   cost = 2; break;
+        case TerrainType::Mountain: cost = 3; break;
+        case TerrainType::Water:    cost = 4; break;
+        case TerrainType::Castle:   cost = 1; break;
     }
-    return 1;
+    // Apply weather movement penalty
+    cost += weather_movement_penalty();
+    return std::max(1, cost);
 }
 
 int32_t BattleStateData::defense_bonus(int32_t x, int32_t y) const {
@@ -423,6 +485,8 @@ int32_t BattleStateData::attack(BattleUnit& attacker, BattleUnit& defender) {
     int32_t eff_atk = attacker.effective_attack();
     int32_t eff_def = defender.effective_defense() +
                       defense_bonus(defender.grid_x, defender.grid_y);
+    // Apply weather attack penalty
+    eff_atk += weather_attack_penalty();
     int32_t dmg = roll_damage(eff_atk, eff_def);
     defender.hp = std::max(0, defender.hp - dmg);
     attacker.has_acted = true;
@@ -691,8 +755,48 @@ void BattleStateData::process_status_effects(BattleUnit& unit) {
     }
 }
 
-bool BattleStateData::can_counterattack(const BattleUnit& unit) const {
-    return unit.has_counterattack();
+void BattleStateData::change_weather() {
+    std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
+    std::uniform_int_distribution<int> dist(0, 3);
+    weather_ = dist(rng);
+    weather_turns_ = 2 + (rng() % 3);  // Weather lasts 2-4 turns
+
+    const char* weather_names[] = {"Clear", "Rain", "Snow", "Fog"};
+    LOG_INFO("BattleStateData: weather changed to %s for %d turns",
+             weather_names[weather_], weather_turns_);
+
+    add_event(fmt::format("Weather changed to {}!", weather_names[weather_]),
+              true, 0, false);
+}
+
+int32_t BattleStateData::weather_movement_penalty() const {
+    switch (weather_) {
+        case 1:  // Rain - mud slows movement
+            return 1;
+        case 2:  // Snow - deep snow slows movement significantly
+            return 2;
+        case 3:  // Fog - reduced visibility but movement unaffected
+            return 0;
+        default:  // Clear
+            return 0;
+    }
+}
+
+int32_t BattleStateData::weather_attack_penalty() const {
+    switch (weather_) {
+        case 1:  // Rain - ranged attacks less effective
+            return -1;
+        case 2:  // Snow - visibility and movement reduced
+            return -1;
+        case 3:  // Fog - hard to see targets
+            return -2;
+        default:  // Clear
+            return 0;
+    }
+}
+
+bool BattleStateData::weather_blocks_vision() const {
+    return weather_ == 3;  // Fog blocks vision
 }
 
 void BattleStateData::next_turn() {
@@ -713,6 +817,21 @@ void BattleStateData::next_turn() {
             if (u.is_sleeping()) {
                 u.has_acted = true;
             }
+        }
+    }
+
+    // Weather changes every few turns
+    if (weather_turns_ > 0) {
+        weather_turns_--;
+        if (weather_turns_ == 0) {
+            change_weather();
+        }
+    } else {
+        // 30% chance of weather change each turn
+        std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
+        std::uniform_int_distribution<int> dist(0, 100);
+        if (dist(rng) < 30) {
+            change_weather();
         }
     }
 
@@ -986,6 +1105,53 @@ int32_t BattleStateData::use_skill(BattleUnit& user, const BattleSkill& skill,
                                       user.name, target->name),
                           user.is_player, 0, true);
             }
+            break;
+        }
+        case SkillType::HealAll: {
+            // Heal all adjacent allies
+            int32_t heal_count = 0;
+            for (auto& ally : units_) {
+                if (ally.is_dead() || !ally.is_player) continue;
+                int32_t dist = std::abs(user.grid_x - ally.grid_x) +
+                               std::abs(user.grid_y - ally.grid_y);
+                if (dist >= 1 && dist <= skill.range) {
+                    int32_t heal = user.effective_attack() * 2;
+                    ally.hp = std::min(ally.max_hp, ally.hp + heal);
+                    heal_count++;
+                }
+            }
+            add_event(fmt::format("{} heals all allies for {} HP!", user.name,
+                                  user.effective_attack() * 2),
+                      user.is_player, 0, true);
+            break;
+        }
+        case SkillType::InspireAll: {
+            // Boost morale of all allies
+            int32_t inspired_count = 0;
+            for (auto& ally : units_) {
+                if (ally.is_dead() || !ally.is_player) continue;
+                int32_t dist = std::abs(user.grid_x - ally.grid_x) +
+                               std::abs(user.grid_y - ally.grid_y);
+                if (dist >= 1 && dist <= skill.range) {
+                    ally.morale = std::min(ally.max_morale, ally.morale + 25);
+                    inspired_count++;
+                }
+            }
+            add_event(fmt::format("{} inspires all allies! Morale boosted.",
+                                  user.name),
+                      user.is_player, 0, true);
+            break;
+        }
+        case SkillType::TacticalRetreat: {
+            // Move and gain defensive bonus (morale)
+            user.morale = std::min(user.max_morale, user.morale + 25);
+            user.has_acted = true;
+            user.used_skill = true;
+            user.move_left = 0;
+            user.morale = std::max(0, user.morale - skill.morale_cost);
+            add_event(fmt::format("{} takes a tactical retreat! Morale boosted.",
+                                  user.name),
+                      user.is_player, 0, true);
             break;
         }
         default:

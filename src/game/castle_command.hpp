@@ -63,6 +63,11 @@ struct CastleData {
     bool is_player_owned = false;     // Player controls this castle
     bool is_capital = false;          // Capital city (victory condition)
     int32_t auto_defense_bonus = 0;   // Auto-defense troops from facilities
+
+    // Loyalty system
+    int32_t loyalty = 50;             // Loyalty 0-100, affects rebellion chance
+    int32_t tax_rate = 50;            // Tax rate 0-100, affects income and loyalty
+    int32_t unrest = 0;               // Unrest 0-100, high unrest causes rebellion
 };
 
 /// Command result
@@ -115,6 +120,20 @@ public:
     // Get recruitment cost per troop
     int32_t recruitment_cost_per_troop() const { return 5; }
 
+    // Tax rate management
+    int32_t tax_rate() const { return castle_tax_rate_; }
+    void set_tax_rate(int32_t rate);
+    int32_t calculate_tax_income(const CastleData& castle) const;
+
+    // Loyalty management
+    int32_t castle_loyalty(uint32_t castle_index) const;
+    void adjust_loyalty(uint32_t castle_index, int32_t delta);
+    int32_t calculate_loyalty_change(const CastleData& castle) const;
+
+    // Rebellion system
+    bool check_rebellion(uint32_t castle_index);
+    void trigger_rebellion(uint32_t castle_index);
+
     // Resource production calculations
     int32_t calculate_gold_income(const CastleData& castle) const;
     int32_t calculate_food_production(const CastleData& castle) const;
@@ -160,6 +179,7 @@ public:
 private:
     std::vector<CastleData> castles_;
     const SndataArchive* sndata_ = nullptr;  // not owned, set in init()
+    int32_t castle_tax_rate_ = 50;  // Global tax rate 0-100
 };
 
 } // namespace tensyoki

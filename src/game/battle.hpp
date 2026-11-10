@@ -59,6 +59,9 @@ enum class SkillType {
     Weakness,       // Enemy attack reduced for 3 turns
     ArmorBreak,     // Enemy defense reduced for 3 turns
     Burn,           // Enemy takes fire damage each turn for 3 turns
+    HealAll,        // Heal all adjacent allies (leader skill)
+    InspireAll,     // Boost morale of all allies (leader skill)
+    TacticalRetreat, // Move and gain defensive bonus
 };
 
 /// Status effect applied to a unit
@@ -323,6 +326,10 @@ public:
     // Get battle log
     const std::vector<BattleEvent>& events() const { return events_; }
 
+    // Get weather information
+    int32_t weather() const { return weather_; }
+    int32_t weather_turns() const { return weather_turns_; }
+
     // Turn management
     void next_turn();
     bool all_player_units_acted() const;
@@ -352,6 +359,10 @@ private:
     uint32_t next_unit_id_ = 1;
     std::vector<BattleEvent> events_;
     BattleSettlement settlement_;
+
+    // Weather system
+    int32_t weather_ = 0;           // 0=Clear, 1=Rain, 2=Snow, 3=Fog
+    int32_t weather_turns_ = 0;     // Turns remaining for current weather
 
     // Helper: index into terrain grid
     int32_t idx(int32_t x, int32_t y) const { return y * grid_width_ + x; }
@@ -384,6 +395,12 @@ private:
 
     // Check if unit can counterattack when attacked
     bool can_counterattack(const BattleUnit& unit) const;
+
+    // Weather effects
+    void change_weather();
+    int32_t weather_movement_penalty() const;
+    int32_t weather_attack_penalty() const;
+    bool weather_blocks_vision() const;
 
     // AI helper: get mutable unit by ID
     BattleUnit* get_unit_by_id(uint32_t id);

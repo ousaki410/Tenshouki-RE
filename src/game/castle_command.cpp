@@ -6,6 +6,7 @@
 #include "core/logging.hpp"
 #include "resource/dat_parser.hpp"
 #include <algorithm>
+#include <random>
 #include <set>
 
 namespace tensyoki {
@@ -190,11 +191,106 @@ int32_t CastleCommand::facility_cost(FacilityType type) const {
     return 0;
 }
 
+void CastleCommand::set_tax_rate(int32_t rate) {
+    castle_tax_rate_ = std::clamp(rate, 0, 100);
+}
+
+int32_t CastleCommand::calculate_tax_income(const CastleData& castle) const {
+    int32_t base_income = 100;  // Base income
+    if (castle.has_market) base_income += 200;
+    if (castle.level > 1) base_income += 50 * (castle.level - 1);  // Level bonus
+
+    // Tax rate affects income (higher rate = more gold but lower loyalty)
+    int32_t income = base_income * castle_tax_rate_ / 100;
+
+    return std::max(0, income);
+}
+
+int32_t CastleCommand::castle_loyalty(uint32_t castle_index) const {
+    auto* castle = get_castle(castle_index);
+    if (!castle) return 50;
+    return castle->loyalty;
+}
+
+void CastleCommand::adjust_loyalty(uint32_t castle_index, int32_t delta) {
+    auto* castle = get_castle(castle_index);
+    if (!castle) return;
+
+    castle->loyalty = std::clamp(castle->loyalty + delta, 0, 100);
+    LOG_INFO("CastleCommand: castle {} loyalty changed by %d, new loyalty: {}",
+             castle_index, delta, castle->loyalty);
+}
+
+int32_t CastleCommand::calculate_loyalty_change(const CastleData& castle) const {
+    int32_t change = 0;
+
+    // Tax rate affects loyalty (high tax = negative, low tax = positive)
+    if (castle_tax_rate_ > 60) {
+        change -= (castle_tax_rate_ - 60) / 10;
+    } else if (castle_tax_rate_ < 40) {
+        change += (40 - castle_tax_rate_) / 10;
+    }
+
+    // Garrison size affects loyalty (more troops = more stable)
+    if (castle.garrison > castle.max_garrison / 2) {
+        change += 1;
+    } else if (castle.garrison < castle.max_garrison / 4) {
+        change -= 2;
+    }
+
+    // Facilities affect loyalty
+    if (castle.has_market) change += 1;
+    if (castle.has_storehouse) change += 1;
+
+    // Lord presence affects loyalty
+    if (castle.lord_officer_id != 0) change += 2;
+
+    return change;
+}
+
+bool CastleCommand::check_rebellion(uint32_t castle_index) {
+    auto* castle = get_castle(castle_index);
+    if (!castle || !castle->is_player_owned) return false;
+
+    // High unrest or low loyalty increases rebellion chance
+    int32_t rebellion_chance = 0;
+
+    if (castle->unrest > 50) {
+        rebellion_chance += (castle->unrest - 50) / 10;
+    }
+    if (castle->loyalty < 30) {
+        rebellion_chance += (30 - castle->loyalty) / 5;
+    }
+
+    // Random chance
+    std::mt19937 rng(castle->index * 1000 + castle->loyalty);
+    std::uniform_int_distribution<int> dist(0, 100);
+
+    if (dist(rng) < rebellion_chance) {
+        trigger_rebellion(castle_index);
+        return true;
+    }
+
+    return false;
+}
+
+void CastleCommand::trigger_rebellion(uint32_t castle_index) {
+    auto* castle = get_castle(castle_index);
+    if (!castle) return;
+
+    castle->is_player_owned = false;
+    castle->lord_officer_id = 0;
+    castle->lord_name.clear();
+    castle->lord_name_utf8.clear();
+    castle->loyalty = 50;
+    castle->unrest = 30;
+
+    LOG_WARN("CastleCommand: CASTLE {} REBELLED! Castle is now independent.",
+             castle_index);
+}
+
 int32_t CastleCommand::calculate_gold_income(const CastleData& castle) const {
-    int32_t income = 100;  // Base income
-    if (castle.has_market) income += 200;
-    if (castle.level > 1) income += 50 * (castle.level - 1);  // Level bonus
-    return income;
+    return calculate_tax_income(castle);
 }
 
 int32_t CastleCommand::calculate_food_production(const CastleData& castle) const {
@@ -222,8 +318,18 @@ void CastleCommand::process_monthly_income() {
     for (auto& castle : castles_) {
         if (!castle.is_player_owned) continue;  // Only process player-owned castles
 
-        // Gold income
-        int32_t income = calculate_gold_income(castle);
+        // Check for rebellion first
+        if (check_rebellion(castle.index)) {
+            continue;  // Castle rebelled, skip income
+        }
+
+        // Calculate loyalty change
+        int32_t loyalty_change = calculate_loyalty_change(castle);
+        castle.loyalty = std::clamp(castle.loyalty + loyalty_change, 0, 100);
+        castle.unrest = std::clamp(castle.unrest - loyalty_change, 0, 100);
+
+        // Gold income from tax
+        int32_t income = calculate_tax_income(castle);
         castle.gold += income;
 
         // Food production and consumption
@@ -231,8 +337,8 @@ void CastleCommand::process_monthly_income() {
         int32_t consumption = calculate_food_consumption(castle);
         castle.food = std::max(0, castle.food + production - consumption);
 
-        LOG_DEBUG("CastleCommand: castle {} income {} gold, food prod {} cons {}",
-                  castle.index, income, production, consumption);
+        LOG_DEBUG("CastleCommand: castle {} income {} gold, food prod {} cons {}, loyalty {}",
+                  castle.index, income, production, consumption, castle.loyalty);
     }
 }
 
