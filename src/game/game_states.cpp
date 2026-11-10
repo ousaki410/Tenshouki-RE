@@ -600,7 +600,7 @@ bool BattleState::update(float dt) {
     // Recalculate movable cells when a unit is selected and move range is shown
     if (show_move_range_ && selected_unit_id_ >= 0) {
         movable_cells_.clear();
-        auto* unit = battle_data_.get_unit_at(0, 0);  // dummy
+        BattleUnit* unit = nullptr;
         for (auto& u : battle_data_.units()) {
             if (u.id == (uint32_t)selected_unit_id_) {
                 unit = &u;
@@ -613,7 +613,6 @@ bool BattleState::update(float dt) {
             int32_t gy = unit->grid_y;
             int32_t max_cost = unit->move_left;
 
-            // BFS from unit position
             std::vector<std::vector<bool>> visited(
                 battle_data_.grid_height(),
                 std::vector<bool>(battle_data_.grid_width(), false));
@@ -648,10 +647,12 @@ bool BattleState::update(float dt) {
         }
     }
 
-    // Recalculate attackable cells
+    // Recalculate melee attackable cells
     attackable_cells_.clear();
+    // Recalculate ranged attackable cells
+    ranged_attackable_cells_.clear();
     if (selected_unit_id_ >= 0) {
-        auto* unit = battle_data_.get_unit_at(0, 0);
+        BattleUnit* unit = nullptr;
         for (auto& u : battle_data_.units()) {
             if (u.id == (uint32_t)selected_unit_id_) {
                 unit = &u;
@@ -659,15 +660,19 @@ bool BattleState::update(float dt) {
             }
         }
         if (unit && !unit->has_acted) {
-            // Check all 4 adjacent cells for enemies
-            const int dx[4] = {0, 1, 0, -1};
-            const int dy[4] = {-1, 0, 1, 0};
-            for (int i = 0; i < 4; ++i) {
-                int32_t tx = unit->grid_x + dx[i];
-                int32_t ty = unit->grid_y + dy[i];
-                auto* target = battle_data_.get_unit_at(tx, ty);
-                if (target && !target->is_dead() && target->is_player != unit->is_player) {
-                    attackable_cells_.push_back({tx, ty});
+            // Check all cells within attack range for enemies
+            int32_t atk_range = unit->get_attack_range();
+            for (auto& target : battle_data_.units()) {
+                if (target.is_dead() || target.is_player == unit->is_player)
+                    continue;
+                int32_t dist = std::abs(unit->grid_x - target.grid_x) +
+                               std::abs(unit->grid_y - target.grid_y);
+                if (dist <= atk_range && dist >= 1) {
+                    if (atk_range == 1) {
+                        attackable_cells_.push_back({target.grid_x, target.grid_y});
+                    } else {
+                        ranged_attackable_cells_.push_back({target.grid_x, target.grid_y});
+                    }
                 }
             }
         }
@@ -730,17 +735,31 @@ void BattleState::render() {
         }
     }
 
-    // --- Render attack range highlight ---
-    if (selected_unit_id_ >= 0) {
+    // --- Render melee attack range highlight (red) ---
+    if (selected_unit_id_ >= 0 && selected_action_ == 0) {
         for (const auto& [ax, ay] : attackable_cells_) {
             float sx = (float)ax * cell_size + screen_cx -
                        (float)battle_data_.grid_width() / 2.0f * cell_size;
             float sy = (float)ay * cell_size + screen_cy -
                        (float)battle_data_.grid_height() / 2.0f * cell_size;
             draw->AddRectFilled({sx, sy}, {sx + cell_size, sy + cell_size},
-                                IM_COL32(255, 100, 100, 80));
+                                IM_COL32(255, 80, 80, 90));
             draw->AddRect({sx, sy}, {sx + cell_size, sy + cell_size},
                           IM_COL32(255, 100, 100, 200), 0.0f, 0, 2.0f);
+        }
+    }
+
+    // --- Render ranged attack range highlight (orange) ---
+    if (selected_unit_id_ >= 0 && selected_action_ == 1) {
+        for (const auto& [ax, ay] : ranged_attackable_cells_) {
+            float sx = (float)ax * cell_size + screen_cx -
+                       (float)battle_data_.grid_width() / 2.0f * cell_size;
+            float sy = (float)ay * cell_size + screen_cy -
+                       (float)battle_data_.grid_height() / 2.0f * cell_size;
+            draw->AddRectFilled({sx, sy}, {sx + cell_size, sy + cell_size},
+                                IM_COL32(255, 180, 80, 90));
+            draw->AddRect({sx, sy}, {sx + cell_size, sy + cell_size},
+                          IM_COL32(255, 160, 80, 200), 0.0f, 0, 2.0f);
         }
     }
 
@@ -783,6 +802,12 @@ void BattleState::render() {
                              ? IM_COL32(100, 200, 100, 255)  // Player: green
                              : IM_COL32(200, 100, 100, 255);  // Enemy: red
 
+        // Unit type color accent
+        if (unit.unit_type == UnitType::Archer)
+            unit_col = IM_COL32(200, 200, 100, 255);  // Archer: yellow
+        else if (unit.unit_type == UnitType::Cavalry)
+            unit_col = IM_COL32(100, 100, 200, 255);  // Cavalry: blue
+
         // Dim units that have acted
         if (unit.has_acted) {
             unit_col = IM_COL32(
@@ -810,19 +835,36 @@ void BattleState::render() {
                       {sx + cell_size * 0.3f, sy - cell_size * 0.5f},
                       IM_COL32(255, 255, 255, 150), 0.0f, 0, 1.0f);
 
+        // Morale bar below HP bar
+        float mor_pct = (float)unit.morale / (float)unit.max_morale;
+        draw->AddRectFilled({sx - cell_size * 0.3f, sy - cell_size * 0.5f},
+                            {sx - cell_size * 0.3f + cell_size * 0.6f * mor_pct,
+                             sy - cell_size * 0.45f},
+                            IM_COL32(255, 215, 0, 200));
+        draw->AddRect({sx - cell_size * 0.3f, sy - cell_size * 0.5f},
+                      {sx + cell_size * 0.3f, sy - cell_size * 0.45f},
+                      IM_COL32(255, 255, 255, 100), 0.0f, 0, 1.0f);
+
         // Move left indicator
         if (unit.is_player && !unit.has_acted && unit.move_left > 0) {
             float mv_pct = (float)unit.move_left / (float)unit.move;
-            draw->AddRectFilled({sx - cell_size * 0.3f, sy - cell_size * 0.55f},
+            draw->AddRectFilled({sx - cell_size * 0.3f, sy - cell_size * 0.4f},
                                 {sx - cell_size * 0.3f + cell_size * 0.6f * mv_pct,
-                                 sy - cell_size * 0.5f},
+                                 sy - cell_size * 0.35f},
                                 IM_COL32(0, 200, 255, 180));
         }
 
-        // Unit label
+        // Unit label with type
+        std::string type_str;
+        switch (unit.unit_type) {
+            case UnitType::Infantry:  type_str = "[Inf]"; break;
+            case UnitType::Cavalry:   type_str = "[Cav]"; break;
+            case UnitType::Archer:    type_str = "[Arc]"; break;
+        }
+        std::string label = type_str + " " + unit.name;
         draw->AddText(static_cast<ImFont*>(nullptr), 10.0f,
-                      {sx - cell_size * 0.3f, sy + cell_size * 0.4f},
-                      IM_COL32(255, 255, 255, 230), unit.name.c_str());
+                      {sx - cell_size * 0.3f, sy + cell_size * 0.45f},
+                      IM_COL32(255, 255, 255, 230), label.c_str());
     }
 
     // --- Render battle result ---
@@ -870,49 +912,79 @@ void BattleState::render() {
         }
         if (unit) {
             ImGui::Text("Selected: %s", unit->name.c_str());
+            std::string type_str;
+            switch (unit->unit_type) {
+                case UnitType::Infantry:  type_str = "Infantry"; break;
+                case UnitType::Cavalry:   type_str = "Cavalry"; break;
+                case UnitType::Archer:    type_str = "Archer"; break;
+            }
+            ImGui::Text("Type: %s  Level: %d", type_str.c_str(), unit->level);
             ImGui::Text("HP: %d/%d", unit->hp, unit->max_hp);
-            ImGui::Text("ATK: %d  DEF: %d", unit->attack, unit->defense);
+            ImGui::Text("Morale: %d/%d", unit->morale, unit->max_morale);
+            ImGui::Text("ATK: %d  DEF: %d", unit->effective_attack(),
+                        unit->effective_defense());
             ImGui::Text("Move: %d/%d", unit->move_left, unit->move);
+            ImGui::Text("Range: %d", unit->get_attack_range());
             ImGui::Separator();
 
+            // Action selection
+            ImGui::Text("Action:");
+            const char* actions[] = {"Melee", "Ranged", "Skill", "Wait"};
+            for (int i = 0; i < 4; ++i) {
+                bool selected = (selected_action_ == i);
+                bool available = false;
+                if (i == 0) available = !unit->has_acted && !attackable_cells_.empty();
+                if (i == 1) available = !unit->has_acted &&
+                                        unit->unit_type == UnitType::Archer &&
+                                        !ranged_attackable_cells_.empty();
+                if (i == 3) available = !unit->has_acted;  // Wait always available
+
+                if (!available) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+                if (ImGui::Selectable(actions[i], selected)) {
+                    selected_action_ = i;
+                    show_move_range_ = false;
+                }
+                if (!available) ImGui::PopStyleColor();
+                if (i < 3) ImGui::SameLine();
+            }
+
             if (!unit->has_acted && unit->move_left > 0) {
+                ImGui::Separator();
                 if (ImGui::Button("Move Range", {-1, 0})) {
                     show_move_range_ = !show_move_range_;
+                    selected_action_ = 0;
                 }
             }
-            if (!unit->has_acted) {
-                if (ImGui::Button("Attack Mode", {-1, 0})) {
-                    // Attack mode - handled in click
-                }
-                ImGui::SameLine();
-                if (!attackable_cells_.empty()) {
-                    ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1),
-                                       "(%zu enemies in range)",
-                                       attackable_cells_.size());
-                }
-            }
+
+            ImGui::Separator();
             if (ImGui::Button("End Turn")) {
                 battle_data_.next_turn();
                 selected_unit_id_ = -1;
                 show_move_range_ = false;
+                selected_action_ = 0;
                 movable_cells_.clear();
                 attackable_cells_.clear();
+                ranged_attackable_cells_.clear();
             }
         }
     } else {
         ImGui::Text("Select a unit");
         if (ImGui::Button("End Turn")) {
             battle_data_.next_turn();
+            selected_action_ = 0;
         }
     }
 
     ImGui::Separator();
 
-    // Battle log
+    // Battle log from events
     ImGui::Text("Battle Log:");
     ImGui::BeginChild("BattleLog", ImVec2(0, 150), true);
-    for (const auto& log_msg : battle_log_) {
-        ImGui::TextUnformatted(log_msg.c_str());
+    for (const auto& evt : battle_data_.events()) {
+        ImVec4 col = evt.is_player_action
+                         ? ImVec4(0.8f, 0.9f, 1.0f, 1.0f)
+                         : ImVec4(1.0f, 0.7f, 0.7f, 1.0f);
+        ImGui::TextColored(col, "%s", evt.message.c_str());
     }
     // Auto-scroll to bottom
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 5.0f) {
@@ -943,35 +1015,56 @@ void BattleState::render() {
             if (unit->is_player && !unit->has_acted) {
                 selected_unit_id_ = unit->id;
                 show_move_range_ = true;
+                selected_action_ = 0;
             } else if (selected_unit_id_ >= 0) {
                 // Try to attack selected unit
-                auto* attacker = battle_data_.get_unit_at(0, 0);
+                BattleUnit* attacker = nullptr;
                 for (auto& u : battle_data_.units()) {
                     if (u.id == (uint32_t)selected_unit_id_) {
                         attacker = &u;
                         break;
                     }
                 }
-                if (attacker && !attacker->has_acted &&
-                    battle_data_.is_in_attack_range(attacker->grid_x,
-                                                    attacker->grid_y, gx, gy)) {
-                    int dmg = battle_data_.attack(*attacker, *unit);
-                    if (dmg > 0) {
-                        battle_log_.push_back(fmt::format(
-                            "{} attacks {} for {} dmg! {} HP remaining",
-                            attacker->name, unit->name, dmg, unit->hp));
-                    }
-                    attacker->has_acted = true;
-                    attacker->move_left = 0;
+                if (!attacker || attacker->has_acted) {
                     selected_unit_id_ = -1;
                     show_move_range_ = false;
-                    movable_cells_.clear();
                     attackable_cells_.clear();
+                    ranged_attackable_cells_.clear();
+                } else if (selected_action_ == 0) {
+                    // Melee attack
+                    int32_t dist = std::abs(attacker->grid_x - gx) +
+                                   std::abs(attacker->grid_y - gy);
+                    if (dist <= 1) {
+                        int dmg = battle_data_.attack(*attacker, *unit);
+                        selected_unit_id_ = -1;
+                        show_move_range_ = false;
+                        selected_action_ = 0;
+                        movable_cells_.clear();
+                        attackable_cells_.clear();
+                        ranged_attackable_cells_.clear();
+                    }
+                } else if (selected_action_ == 1) {
+                    // Ranged attack (archers only)
+                    if (attacker->unit_type != UnitType::Archer) {
+                        // Not an archer, can't use ranged
+                    } else {
+                        int32_t dist = std::abs(attacker->grid_x - gx) +
+                                       std::abs(attacker->grid_y - gy);
+                        if (dist >= 2 && dist <= 3) {
+                            int dmg = battle_data_.ranged_attack(*attacker, *unit);
+                            selected_unit_id_ = -1;
+                            show_move_range_ = false;
+                            selected_action_ = 0;
+                            movable_cells_.clear();
+                            attackable_cells_.clear();
+                            ranged_attackable_cells_.clear();
+                        }
+                    }
                 }
             }
         } else if (selected_unit_id_ >= 0) {
             // Try to move selected unit to clicked cell
-            auto* attacker = battle_data_.get_unit_at(0, 0);
+            BattleUnit* attacker = nullptr;
             for (auto& u : battle_data_.units()) {
                 if (u.id == (uint32_t)selected_unit_id_) {
                     attacker = &u;
@@ -990,7 +1083,7 @@ void BattleState::render() {
                     }
                 }
                 if (can_move) {
-                    // Move unit (single step for now)
+                    // Move unit
                     terrain_grid_cell_update(battle_data_, attacker, gx, gy);
                     int32_t cost = battle_data_.movement_cost(gx, gy);
                     attacker->move_left -= cost;
@@ -1000,8 +1093,7 @@ void BattleState::render() {
                     show_move_range_ = false;
                     movable_cells_.clear();
                     attackable_cells_.clear();
-                    battle_log_.push_back(fmt::format(
-                        "{} moved to ({}, {})", attacker->name, gx, gy));
+                    ranged_attackable_cells_.clear();
                 }
             }
         }
