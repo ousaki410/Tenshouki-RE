@@ -1,3 +1,6 @@
+# Build output (not committed; `build/` is a local snapshot only)
+build/
+build_*/
 # Vendored dependency checkouts (upstream git repos, fetched by CMake FetchContent)
 build/_deps/*-src/
 
