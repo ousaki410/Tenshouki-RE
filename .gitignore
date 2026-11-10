@@ -4,6 +4,10 @@ build_*/
 # Vendored dependency checkouts (upstream git repos, fetched by CMake FetchContent)
 build/_deps/*-src/
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Logs
 *.log
 tensyoki.log

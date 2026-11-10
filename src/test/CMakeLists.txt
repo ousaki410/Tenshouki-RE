@@ -35,3 +35,24 @@ target_link_libraries(bin_parser_tests PRIVATE
 
 # Add test
 add_test(NAME bin_parser_tests COMMAND bin_parser_tests)
+
+# DAT / sndata data-layer tests
+add_executable(dat_parser_tests
+    test_dat_parser.cpp
+    ../resource/dat_parser.cpp
+    ../core/logging.cpp
+)
+
+target_include_directories(dat_parser_tests PRIVATE
+    ../core
+    ../resource
+)
+
+target_link_libraries(dat_parser_tests PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    spdlog::spdlog
+    fmt::fmt
+)
+
+add_test(NAME dat_parser_tests COMMAND dat_parser_tests)

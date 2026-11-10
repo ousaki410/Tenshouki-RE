@@ -11,11 +11,17 @@ A native Linux port of *Nobunaga's Ambition: Tenshouki* (信長の野望・天�
 - Rendering abstraction: OpenGL backend, sprite/text renderer framework
 - Debug UI: ImGui resource browser, hex viewer
 
-**Phase 2 (clean build / baseline validation) — in progress** 🔧
+**Phase 2 (clean build / baseline validation) — complete** ✅
 - Build system, API drift and ownership issues fixed
 - `BinArchive` rewritten to the documented LINK layout (16-byte header, 8-byte table,
   `0x89ABCDEF` sentinels, nested LINK with multi-block GT1G/LWC data);
   `tools/verify_resources.py` passes all six `res/*.bin` containers
+- Data layer: `SndataArchive` parser for scenario/sndata1..6.dat (officers,
+  castles, CP932 name decoding); 4 unit tests + real-file integration tests
+
+**Phase 3 (data layer + rendering core) — next** 🔲
+- Officers / castles data layer just completed (see docs/formats/sndata.md)
+- Renderer core: texture upload from GT1G blocks, sprite rendering, text rendering
 
 ## Game files
 
