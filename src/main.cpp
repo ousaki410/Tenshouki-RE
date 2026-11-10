@@ -155,6 +155,7 @@ private:
         // Initialize text renderer with default font
         text_renderer_ = std::make_unique<Renderer::TextRenderer>(*renderer_);
         const char* default_fonts[] = {
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  // CJK support
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             nullptr
@@ -438,21 +439,55 @@ private:
         // Text rendering demo
         if (text_renderer_) {
             ImGui::Begin("Text Demo", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+            ImGui::Text("Alignment:");
             text_renderer_->draw(Renderer::TextRenderer::TextParams{
-                .text = "Tensyoki - Nobunaga's Ambition: Tenshouki HD",
+                .text = "Left aligned",
                 .position = {10.0f, 10.0f},
-                .size = 32.0f,
+                .size = 20.0f,
                 .color = {1.0f, 1.0f, 1.0f, 1.0f},
+                .wrap_width = 300.0f,
+                .align = Renderer::TextRenderer::TextParams::Align::Left,
             });
             text_renderer_->draw(Renderer::TextRenderer::TextParams{
-                .text = "Linux native port - Phase 3: Data layer + Rendering core",
-                .position = {10.0f, 50.0f},
+                .text = "Center aligned",
+                .position = {10.0f, 40.0f},
                 .size = 20.0f,
-                .color = {0.8f, 0.8f, 1.0f, 1.0f},
+                .color = {1.0f, 1.0f, 1.0f, 1.0f},
+                .wrap_width = 300.0f,
+                .align = Renderer::TextRenderer::TextParams::Align::Center,
             });
+            text_renderer_->draw(Renderer::TextRenderer::TextParams{
+                .text = "Right aligned",
+                .position = {10.0f, 70.0f},
+                .size = 20.0f,
+                .color = {1.0f, 1.0f, 1.0f, 1.0f},
+                .wrap_width = 300.0f,
+                .align = Renderer::TextRenderer::TextParams::Align::Right,
+            });
+
+            ImGui::Separator();
+            ImGui::Text("CJK (UTF-8):");
+            text_renderer_->draw(Renderer::TextRenderer::TextParams{
+                .text = "信長の野望・天翔記 HD",
+                .position = {10.0f, 100.0f},
+                .size = 24.0f,
+                .color = {1.0f, 0.9f, 0.7f, 1.0f},
+                .wrap_width = 400.0f,
+            });
+            text_renderer_->draw(Renderer::TextRenderer::TextParams{
+                .text = "織田信長・羽柴秀吉・徳川家康",
+                .position = {10.0f, 130.0f},
+                .size = 20.0f,
+                .color = {0.9f, 1.0f, 0.9f, 1.0f},
+                .wrap_width = 400.0f,
+            });
+
+            ImGui::Separator();
+            ImGui::Text("Wrapping:");
             text_renderer_->draw(Renderer::TextRenderer::TextParams{
                 .text = "Wrapping test: this is a longer line of text that should wrap at the specified width.",
-                .position = {10.0f, 80.0f},
+                .position = {10.0f, 170.0f},
                 .size = 18.0f,
                 .color = {1.0f, 0.8f, 0.8f, 1.0f},
                 .wrap_width = 400.0f,

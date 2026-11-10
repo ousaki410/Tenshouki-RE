@@ -544,6 +544,61 @@ constexpr int kAtlasHeight = 1024;
 constexpr uint32_t kFirstChar = 0x20;  // space
 constexpr uint32_t kLastChar = 0x7E;   // tilde
 
+/// Decode a UTF-8 string into a vector of Unicode codepoints.
+std::vector<uint32_t> decode_utf8(const std::string& s) {
+    std::vector<uint32_t> out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        uint8_t lead = static_cast<uint8_t>(s[i]);
+        uint32_t cp = 0;
+        int seq_len = 1;
+        if (lead < 0x80) {
+            cp = lead;
+        } else if ((lead & 0xE0) == 0xC0) {
+            cp = lead & 0x1F; seq_len = 2;
+        } else if ((lead & 0xF0) == 0xE0) {
+            cp = lead & 0x0F; seq_len = 3;
+        } else if ((lead & 0xF8) == 0xF0) {
+            cp = lead & 0x07; seq_len = 4;
+        } else {
+            // Invalid lead byte: skip
+            ++i;
+            continue;
+        }
+        bool ok = true;
+        for (int j = 1; j < seq_len; ++j) {
+            if (i + j >= s.size()) { ok = false; break; }
+            uint8_t cont = static_cast<uint8_t>(s[i + j]);
+            if ((cont & 0xC0) != 0x80) { ok = false; break; }
+            cp = (cp << 6) | (cont & 0x3F);
+        }
+        if (!ok) { ++i; continue; }
+        out.push_back(cp);
+        i += seq_len;
+    }
+    return out;
+}
+
+/// Per-glyph layout information (computed during the layout pass).
+struct LayoutGlyph {
+    uint32_t codepoint = 0;
+    float x = 0;       // cursor x before this glyph (pre-alignment)
+    float y = 0;       // line y (pre-alignment)
+    float advance = 0; // advance in pixels at current scale
+    float bearing_x = 0;
+    float bearing_y = 0;
+    float width = 0;
+    float height = 0;
+    glm::vec4 uv_rect = {0, 0, 1, 1};
+};
+
+/// One line of laid-out text.
+struct LayoutLine {
+    float width = 0;              // total advance width of the line
+    std::vector<LayoutGlyph> glyphs;
+};
+
 } // namespace
 
 struct GlyphInfo {
@@ -612,7 +667,6 @@ struct Renderer::TextRenderer::Impl {
             if (FT_Load_Char(ft_face_, cp, FT_LOAD_RENDER) != 0) continue;
             FT_Bitmap& bm = ft_face_->glyph->bitmap;
             if (bm.width == 0 || bm.rows == 0) {
-                // Empty glyph (e.g. space) - record advance only
                 GlyphInfo info;
                 info.codepoint = cp;
                 info.size = {0, 0};
@@ -704,20 +758,21 @@ struct Renderer::TextRenderer::Impl {
         info.data_size = rgba.size();
         info.mip_levels = 1;
 
-        if (atlas_texture_obj_) {
-            // Re-create texture with updated data
-            atlas_texture_obj_ = renderer_.create_texture(info);
-        } else {
-            atlas_texture_obj_ = renderer_.create_texture(info);
-        }
+        atlas_texture_obj_ = renderer_.create_texture(info);
         atlas_dirty_ = false;
     }
 
-    GlyphInfo* get_glyph(uint32_t codepoint) {
+    const GlyphInfo* get_glyph_ptr(uint32_t codepoint) const {
+        auto it = glyphs_.find(codepoint);
+        if (it != glyphs_.end()) return &it->second;
+        return nullptr;
+    }
+
+    const GlyphInfo* ensure_glyph(uint32_t codepoint) {
         auto it = glyphs_.find(codepoint);
         if (it != glyphs_.end()) return &it->second;
 
-        // Try to render on demand
+        // Try to render on demand (this may insert into the map)
         if (ft_face_ && FT_Load_Char(ft_face_, codepoint, FT_LOAD_RENDER) == 0) {
             FT_Bitmap& bm = ft_face_->glyph->bitmap;
             if (bm.width > 0 && bm.rows > 0) {
@@ -732,6 +787,7 @@ struct Renderer::TextRenderer::Impl {
                     info.uv_rect = uv;
                     glyphs_[codepoint] = info;
                     upload_atlas();
+                    // Re-fetch after potential rehash
                     return &glyphs_.at(codepoint);
                 }
             } else {
@@ -748,45 +804,22 @@ struct Renderer::TextRenderer::Impl {
         return nullptr;
     }
 
-    void draw(const Renderer::TextRenderer::TextParams& params) {
-        if (!ft_face_ || !atlas_texture_obj_) return;
-
-        sprite_renderer_->begin(glm::ortho(0.0f, static_cast<float>(renderer_.get_width()),
-                                           static_cast<float>(renderer_.get_height()), 0.0f));
-
-        // Layout: wrap and compute line positions
-        struct Line {
-            float x = 0;
-            float y = 0;
-            float width = 0;
-        };
-        std::vector<Line> lines;
+    /// Layout text into lines, computing per-glyph positions (pre-alignment).
+    std::vector<LayoutLine> layout_text(const std::vector<uint32_t>& codepoints,
+                                         float scale, float line_height,
+                                         float wrap_width, float letter_spacing) {
+        std::vector<LayoutLine> lines;
         lines.emplace_back();
 
-        float scale = params.size / font_size_;
-        float line_height = params.line_height * font_size_ * scale;
         float cursor_x = 0.0f;
         float cursor_y = 0.0f;
-        float max_width = 0.0f;
 
-        auto measure_word = [&](const std::string& word) -> float {
-            float w = 0;
-            for (char c : word) {
-                if (auto* g = get_glyph(static_cast<uint32_t>(static_cast<unsigned char>(c)))) {
-                    w += static_cast<float>(g->advance) / 64.0f * scale;
-                    w += params.letter_spacing * scale;
-                }
-            }
-            return w;
-        };
-
-        // Simple wrapping by words
         size_t i = 0;
-        while (i < params.text.size()) {
-            char c = params.text[i];
-            if (c == '\n') {
+        while (i < codepoints.size()) {
+            uint32_t cp = codepoints[i];
+
+            if (cp == '\n') {
                 lines.back().width = cursor_x;
-                max_width = std::max(max_width, cursor_x);
                 lines.emplace_back();
                 cursor_x = 0;
                 cursor_y += line_height;
@@ -794,100 +827,167 @@ struct Renderer::TextRenderer::Impl {
                 continue;
             }
 
-            if (c == ' ') {
-                if (params.wrap_width > 0 && cursor_x + params.letter_spacing * scale > params.wrap_width) {
+            // Collect a word (sequence of non-space, non-newline codepoints)
+            size_t word_start = i;
+            while (i < codepoints.size() && codepoints[i] != ' ' && codepoints[i] != '\n') {
+                ++i;
+            }
+
+            // Measure the word
+            float word_w = 0;
+            for (size_t j = word_start; j < i; ++j) {
+                if (auto* g = get_glyph_ptr(codepoints[j])) {
+                    word_w += static_cast<float>(g->advance) / 64.0f * scale;
+                    word_w += letter_spacing * scale;
+                } else {
+                    word_w += 0.5f * scale;  // fallback
+                }
+            }
+
+            // Wrap if needed
+            if (wrap_width > 0 && cursor_x + word_w > wrap_width && cursor_x > 0) {
+                lines.back().width = cursor_x;
+                lines.emplace_back();
+                cursor_x = 0;
+                cursor_y += line_height;
+            }
+
+            // Emit each glyph in the word
+            for (size_t j = word_start; j < i; ++j) {
+                uint32_t cp = codepoints[j];
+                const GlyphInfo* g = get_glyph_ptr(cp);
+                if (!g) {
+                    ensure_glyph(cp);
+                    g = get_glyph_ptr(cp);
+                }
+
+                LayoutGlyph lg;
+                lg.codepoint = cp;
+                lg.x = cursor_x;
+                lg.y = cursor_y;
+                if (g) {
+                    lg.advance = static_cast<float>(g->advance) / 64.0f * scale;
+                    lg.bearing_x = g->bearing.x * scale;
+                    lg.bearing_y = g->bearing.y * scale;
+                    lg.width = g->size.x * scale;
+                    lg.height = g->size.y * scale;
+                    lg.uv_rect = g->uv_rect;
+                } else {
+                    lg.advance = 0.5f * scale;
+                    lg.width = 0;
+                    lg.height = 0;
+                    lg.uv_rect = {0, 0, 0, 0};
+                }
+                lg.advance += letter_spacing * scale;
+
+                lines.back().glyphs.push_back(lg);
+                cursor_x += lg.advance;
+            }
+
+            // Handle space between words
+            if (i < codepoints.size() && codepoints[i] == ' ') {
+                if (wrap_width > 0 && cursor_x + letter_spacing * scale > wrap_width) {
                     lines.back().width = cursor_x;
-                    max_width = std::max(max_width, cursor_x);
                     lines.emplace_back();
                     cursor_x = 0;
                     cursor_y += line_height;
                 } else {
-                    cursor_x += params.letter_spacing * scale;
+                    cursor_x += letter_spacing * scale;
                 }
                 ++i;
-                continue;
-            }
-
-            // Collect a word
-            size_t word_start = i;
-            while (i < params.text.size() && params.text[i] != ' ' && params.text[i] != '\n') {
-                ++i;
-            }
-            std::string word = params.text.substr(word_start, i - word_start);
-            float word_w = measure_word(word);
-
-            if (params.wrap_width > 0 && cursor_x + word_w > params.wrap_width && cursor_x > 0) {
-                lines.back().width = cursor_x;
-                max_width = std::max(max_width, cursor_x);
-                lines.emplace_back();
-                cursor_x = 0;
-                cursor_y += line_height;
-            }
-
-            // Render each char in the word
-            for (char wc : word) {
-                auto* g = get_glyph(static_cast<uint32_t>(static_cast<unsigned char>(wc)));
-                if (!g) {
-                    cursor_x += params.letter_spacing * scale;
-                    continue;
-                }
-
-                float gw = g->size.x * scale;
-                float gh = g->size.y * scale;
-                if (gw > 0 && gh > 0) {
-                    Renderer::SpriteRenderer::Sprite sprite;
-                    sprite.position = {
-                        cursor_x + g->bearing.x * scale,
-                        cursor_y + (font_size_ - g->bearing.y) * scale - gh
-                    };
-                    sprite.size = {gw, gh};
-                    sprite.color = params.color;
-                    sprite.texture = atlas_texture_obj_;
-                    sprite.uv_rect = g->uv_rect;
-                    sprite.layer = 0;
-                    sprite_renderer_->draw(sprite);
-                }
-                cursor_x += static_cast<float>(g->advance) / 64.0f * scale;
-                cursor_x += params.letter_spacing * scale;
             }
         }
 
-        lines.back().width = cursor_x;
-        max_width = std::max(max_width, cursor_x);
-        float total_height = cursor_y + line_height;
+        if (!lines.empty()) {
+            lines.back().width = cursor_x;
+        }
+        return lines;
+    }
 
-        // Apply alignment
-        // Note: we already rendered left-aligned; for center/right we'd need a second pass.
-        // For now, store alignment info and re-render if needed. Simple approach: render left-aligned.
-        (void)lines;
-        (void)max_width;
-        (void)total_height;
+    void draw(const Renderer::TextRenderer::TextParams& params) {
+        if (!ft_face_ || !atlas_texture_obj_) return;
+
+        auto codepoints = decode_utf8(params.text);
+        if (codepoints.empty()) return;
+
+        float scale = params.size / font_size_;
+        float line_height = params.line_height * font_size_ * scale;
+
+        auto lines = layout_text(codepoints, scale, line_height,
+                                 params.wrap_width, params.letter_spacing);
+
+        sprite_renderer_->begin(glm::ortho(0.0f, static_cast<float>(renderer_.get_width()),
+                                           static_cast<float>(renderer_.get_height()), 0.0f));
+
+        for (auto& line : lines) {
+            // Compute horizontal alignment offset
+            float x_offset = 0.0f;
+            if (params.wrap_width > 0) {
+                switch (params.align) {
+                    case Renderer::TextRenderer::TextParams::Align::Center:
+                        x_offset = (params.wrap_width - line.width) * 0.5f;
+                        break;
+                    case Renderer::TextRenderer::TextParams::Align::Right:
+                        x_offset = params.wrap_width - line.width;
+                        break;
+                    case Renderer::TextRenderer::TextParams::Align::Left:
+                    default:
+                        x_offset = 0.0f;
+                        break;
+                }
+            }
+
+            float base_y = params.position.y;
+
+            for (auto& lg : line.glyphs) {
+                const GlyphInfo* g = get_glyph_ptr(lg.codepoint);
+                if (!g) continue;
+
+                float gw = lg.width;
+                float gh = lg.height;
+                if (gw <= 0 || gh <= 0) continue;
+
+                Renderer::SpriteRenderer::Sprite sprite;
+                sprite.position = {
+                    params.position.x + x_offset + lg.x + lg.bearing_x,
+                    base_y + lg.y + (font_size_ - g->bearing.y) * scale - gh
+                };
+                sprite.size = {gw, gh};
+                sprite.color = params.color;
+                sprite.texture = atlas_texture_obj_;
+                sprite.uv_rect = lg.uv_rect;
+                sprite.layer = 0;
+                sprite_renderer_->draw(sprite);
+            }
+        }
 
         sprite_renderer_->end();
     }
 
     glm::vec2 measure_text(const std::string& text, float size) const {
         if (!ft_face_) return {0, 0};
+
+        auto codepoints = decode_utf8(text);
         float scale = size / font_size_;
         float line_height = 1.2f * font_size_ * scale;
         float cursor_x = 0;
         float cursor_y = 0;
         float max_width = 0;
 
-        for (char c : text) {
-            if (c == '\n') {
+        for (uint32_t cp : codepoints) {
+            if (cp == '\n') {
                 max_width = std::max(max_width, cursor_x);
                 cursor_x = 0;
                 cursor_y += line_height;
                 continue;
             }
-            if (c == ' ') {
+            if (cp == ' ') {
                 cursor_x += 0.5f * size * scale;  // rough space width
                 continue;
             }
-            if (auto it = glyphs_.find(static_cast<uint32_t>(static_cast<unsigned char>(c)));
-                it != glyphs_.end()) {
-                cursor_x += static_cast<float>(it->second.advance) / 64.0f * scale;
+            const GlyphInfo* g = get_glyph_ptr(cp);
+            if (g) {
+                cursor_x += static_cast<float>(g->advance) / 64.0f * scale;
             } else {
                 cursor_x += 0.5f * size * scale;
             }
