@@ -252,6 +252,7 @@ std::string BinArchive::sniff_signature(std::span<const uint8_t> data) {
     if (data.size() >= 4) {
         if (starts_with(data, "LINK")) return "LINK";
         if (starts_with(data, "GT1G")) return "GT1G";
+        if (starts_with(data, "_N1G")) return "N1G";
         if (starts_with(data, "LS11")) return "LS11";
         if (starts_with(data, "DBUG")) return "DBUG";
         if (starts_with(data, "DXBC")) return "DXBC";
@@ -552,6 +553,7 @@ void BinArchive::clear() noexcept {
 std::string BinFileEntry::guess_extension() const {
     if (signature == "LINK")  return ".link";
     if (signature == "GT1G")  return ".gt1g";
+    if (signature == "N1G")   return ".n1g";
     if (signature == "LS11")  return ".ls11";
     if (signature == "DDS")   return ".dds";
     if (signature == "DBUG" || signature == "DXBC") return ".shader";

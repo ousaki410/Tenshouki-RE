@@ -452,6 +452,35 @@ TEST_F(BinArchiveTest, ParseAllRealContainersWhenAvailable) {
     }
 }
 
+/// res_grp entry 1 is a `_N1G` payload, not a nested LINK container
+TEST_F(BinArchiveTest, ResGrpN1gSignatureWhenAvailable) {
+    const char* root = std::getenv("TENSYOKI_DATA_ROOT");
+    if (!root) {
+        GTEST_SKIP() << "TENSYOKI_DATA_ROOT not set";
+    }
+    auto path = std::filesystem::path(root) / "res" / "res_grp.bin";
+    if (!std::filesystem::exists(path)) {
+        GTEST_SKIP() << "res_grp.bin not found under " << root;
+    }
+
+    BinArchive archive;
+    auto result = archive.load_from_file(path);
+    ASSERT_TRUE(result) << tensyoki::to_string(result.error());
+    ASSERT_GT(archive.entries().size(), 1u);
+
+    const auto& entry = archive.entries()[1];
+    EXPECT_EQ(entry.signature, "N1G");
+    EXPECT_EQ(entry.guess_extension(), ".n1g");
+    EXPECT_FALSE(entry.is_nested_link);
+
+    // The remaining 20 entries are nested LINK containers
+    size_t nested = 0;
+    for (const auto& e : archive.entries()) {
+        if (e.is_nested_link) nested++;
+    }
+    EXPECT_EQ(nested, 20u);
+}
+
 } // namespace test
 } // namespace tensyoki
 

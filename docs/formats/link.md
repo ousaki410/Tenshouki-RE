@@ -123,12 +123,16 @@ Data start rule: `data_offset = ((descriptor_offset + 12 * n) rounded down to 16
 | --- | --- | --- |
 | res_else entry 1 at 0x2C | starts with ASCII `LS11`; meaning unknown | observed |
 | res_shader entry 0 at 0x40 | begins with bytes `00 02 ff ff`, then `fe ff fb 01`, then ASCII `DBUG`; a path string beginning `C:\Project\` appears 0x30 bytes later | observed |
+| res_grp entry 1 at 0x4812EC | starts with ASCII `_N1G` followed by `0000`; `+0x08` = 0x38A73C, equal to the payload size; `+0x0C` = 0x0B6C, `+0x18` = 0x2D, `+0x1C` = 3; `+0x20` begins the u32 sequence 0x0B6C, 0x0385B4, 0x0591B4, then bytes `ff ff ff 00`, `ff ff ff 11`, `ff ff ff 20`, `ff ff ff 3A`, `ff ff ff 57` (an alpha ramp on opaque white); byte entropy 3.54 | observed |
 
 The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0xFFFF0200 (pixel shader 2.0), a comment token, and a `DBUG` debug-info comment that embeds a source path. This matches the DirectX 9.0c requirement of the game. Treat as a hypothesis until confirmed against the public Direct3D 9 shader bytecode documentation. Shader bytes must not be committed.
+
+`res_grp` entry 1 is the only non-`LINK` payload in that container; the other 20 entries are nested `LINK` containers. The `_N1G0000` tag and the `+0x08` size field suggest a self-describing image or tile container. The header fields and the alpha ramp are recorded here only as observations; the payload is not decoded yet and no public specification has been compared.
 
 ## 9. Hypotheses
 
 - `LS11` is a sub-container or compressed-stream tag. Test: capture a longer excerpt and look for repeating structure.
+- `_N1G` is a paletted or compressed image container: entropy is 3.54 and the first bytes after the header form an alpha ramp. Test: compare against public Koei `N1G` documentation and look for a width/height pair in the header.
 - The 4-byte gap after each payload is the constant 0x89ABCDEF used as a terminator or integrity marker. Test: read the gap after every entry in every file.
 - The three non-empty entries of `res_shader.bin` hold compiled Direct3D 9 shaders. Test: parse the leading tokens of each payload.
 
@@ -137,7 +141,7 @@ The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0
 - Does every gap equal 0x89ABCDEF?
 - Which `res_grp` entry-0 record reaches x + w = 1,280?
 - What are the 16 bytes between descriptor end and data start?
-- Do the other 20 `res_grp.bin` entries use the same nested layout?
+- What do the `_N1G` header fields at `+0x0C`, `+0x18`, `+0x1C` and the table at `+0x20` describe?
 
 ## 11. Changelog
 
@@ -148,3 +152,4 @@ The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0
 | 2026-10-12 | Decoded descriptor records, gap sentinel, shader payload; corrected res_shader tail analysis | E-0011..E-0015 |
 | 2026-10-12 | Statistics for three nested containers, texture index evidence, second sentinel, GT1G split into gt1g.md | E-0016..E-0019 |
 | 2026-11-10 | Parser and validator rewritten to this layout; all six containers pass; data-start rule limited to the tested samples | E-0020 |
+| 2026-11-10 | Recognized the `_N1G` payload in `res_grp` entry 1; the other 20 entries are nested `LINK` | E-0021 |

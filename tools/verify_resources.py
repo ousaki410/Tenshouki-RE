@@ -30,7 +30,7 @@ GT1G_TEXTURE_HEADER_SIZE = 20
 
 SIGNATURES = [
     (b"DDS ", "dds"), (b"\x89PNG", "png"), (b"BM", "bmp"), (b"RIFF", "riff/wav"),
-    (b"OggS", "ogg"), (b"LINK", "link"), (b"GT1G", "gt1g"), (b"LS11", "ls11"),
+    (b"OggS", "ogg"), (b"LINK", "link"), (b"GT1G", "gt1g"), (b"_N1G", "n1g"), (b"LS11", "ls11"),
     (b"DBUG", "dxbc-debug"), (b"DXBC", "dxbc"),
     (b"\x78\x9c", "zlib"), (b"\x78\x01", "zlib"),
     (b"\x78\xda", "zlib"), (b"\x1f\x8b", "gzip"), (b"MZ", "pe"), (b"\x7fELF", "elf"),

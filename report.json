@@ -150,7 +150,7 @@
           "name": "entry_0001",
           "offset": 4723436,
           "size": 3712828,
-          "signature": "unknown",
+          "signature": "n1g",
           "sentinel": true
         },
         {
@@ -427,7 +427,7 @@
       "nested_entries": 20,
       "type_distribution": {
         "link": 20,
-        "unknown": 1
+        "n1g": 1
       },
       "sentinel_count": 21,
       "data_coverage": 1.0,

@@ -215,3 +215,23 @@ Common to E-0001..E-0019: date 2026-10-12; method static inspection (`ls`, `sha2
   - `res_grp.bin` entries 6, 7, 8, 9, 10, 13, 15, 16 and 20 have data offsets that differ from the data-start rule by 0x10 or -0x10 (e.g. entry 6: actual 0x60, predicted 0x50). Entry 0 follows the rule exactly.
 - Related: link.md sections 6 and 7
 - Result: supports the container layout; refines the data-start rule to entry 0 of the GT1G-bearing files only
+
+### E-0021: `_N1G` payload in res_grp entry 1
+
+- Date: 2026-11-10
+- Source file: `res/res_grp.bin`
+- Size (bytes): 365574996
+- SHA-256: e31700c0262cc6aa82f8b9e6a643fa049e88c2293caadf0f42da99b6bf3ff5d7
+- Game version / build: HD Power Up Kit, third-party repackaged distribution (same as E-0001..E-0004)
+- Provenance: third-party repackaged distribution; re-verify against retail files before decoding
+- Method: static inspection
+- Command(s): read the entry table, then dump the first 64 bytes of entry 1
+- Observation:
+  - Entry 1 at 0x4812EC is 3,712,828 bytes and starts with ASCII `_N1G` followed by `0000`.
+  - Header u32 values: `0x47314E5F` (`_N1G`), `0x30303030` (`0000`), `0x0038A73C` (= payload size), `0x00000B6C`, `0`, `0x000791CC`, `0x2D`, `3`.
+  - `+0x20` begins 0x0B6C, 0x0385B4, 0x0591B4, then `ff ff ff 00`, `ff ff ff 11`, `ff ff ff 20`, `ff ff ff 3A`, `ff ff ff 57`, i.e. white with an increasing alpha byte.
+  - Overall byte entropy is 3.54; the first 64 KiB have entropy 1.75.
+  - The other 20 entries of `res_grp.bin` start with `LINK`; entry 1 is the only `_N1G` payload in the container.
+- Hex excerpt (<= 64 bytes): `5f 4e 31 47 30 30 30 30 3c a7 38 00 6c 0b 00 00 00 00 00 00 cc 91 07 00 2d 00 00 00 03 00 00 00 6c 0b 00 00 b4 85 03 00 b4 91 05 00 ff ff ff 00 ff ff ff 11`
+- Related format document: link.md section 8
+- Result: inconclusive (tag and header observed; layout not decoded)
