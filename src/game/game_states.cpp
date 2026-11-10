@@ -6,6 +6,7 @@
 #include "core/logging.hpp"
 #include <fmt/format.h>
 #include <imgui.h>
+#include <algorithm>
 
 namespace tensyoki {
 
@@ -22,7 +23,6 @@ void MainMenuState::enter() {
 
 bool MainMenuState::update(float dt) {
     (void)dt;
-    // Input is handled via ImGui in render()
     return true;
 }
 
@@ -46,11 +46,9 @@ void MainMenuState::render() {
         if (ImGui::Selectable(items[i], selected)) {
             selected_item_ = i;
             if (i == 0) {
-                // New game -> go to map
-                ctx_.date = GameDate{1, 4, 1};  // Tensho 1, April 1 (Spring)
-                // This will be handled by Application
+                ctx_.date = GameDate{1, 4, 1};
             } else if (i == 2) {
-                // Quit
+                // Quit - handled by Application
             }
         }
         ImGui::PopStyleColor();
@@ -60,7 +58,6 @@ void MainMenuState::render() {
     ImGui::Text("Use UP/DOWN to select, ENTER to confirm");
     ImGui::End();
 
-    // Handle keyboard input for menu navigation
     if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
         selected_item_ = (selected_item_ - 1 + 3) % 3;
     }
@@ -69,9 +66,10 @@ void MainMenuState::render() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
         if (selected_item_ == 0) {
-            // Start new game
+            ctx_.date = GameDate{1, 4, 1};
+            ctx_.pending_push = GameContext::PendingState::MapView;
         } else if (selected_item_ == 2) {
-            // Quit
+            ctx_.request_pop = true;
         }
     }
 }
@@ -85,6 +83,7 @@ MapViewState::MapViewState(GameContext& ctx) : ctx_(ctx) {}
 void MapViewState::enter() {
     LOG_INFO("MapViewState: enter");
     init_done_ = false;
+    selected_officer_ = -1;
 }
 
 bool MapViewState::update(float dt) {
@@ -107,7 +106,6 @@ void MapViewState::render() {
         return;
     }
 
-    // Full-screen map overlay
     ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
     ImGui::SetNextWindowSize({(float)ctx_.renderer->get_width(),
                               (float)ctx_.renderer->get_height()},
@@ -119,7 +117,6 @@ void MapViewState::render() {
 
     map_view_.render(*ctx_.renderer);
 
-    // Handle mouse clicks on the map
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         ImVec2 mouse = ImGui::GetMousePos();
         map_view_.handle_click(mouse.x, mouse.y, *ctx_.renderer);
@@ -127,9 +124,8 @@ void MapViewState::render() {
 
     ImGui::End();
 
-    // Render castle info panel
     ImGui::SetNextWindowPos({10, 10}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({320, 420}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({340, 500}, ImGuiCond_Always);
     ImGui::Begin("Map Info", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
@@ -152,6 +148,42 @@ void MapViewState::render() {
                                               : cp->name_utf8.c_str());
             ImGui::Text("Position: (%.0f, %.0f)", cp->x, cp->y);
             ImGui::Text("Region: %u", cp->region_id);
+            ImGui::Separator();
+
+            ImGui::Text("Garrison Officers:");
+            int shown = 0;
+            if (ctx_.sndata) {
+                for (const auto& officer : ctx_.sndata->officers) {
+                    if (officer.slot % ctx_.sndata->castle_count() == cp->index) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                        if (ImGui::Selectable(
+                                fmt::format("ID {}: {}", officer.id,
+                                            officer.name_utf8.empty()
+                                                ? officer.name_raw
+                                                : officer.name_utf8)
+                                        .c_str(),
+                                selected_officer_ == officer.slot)) {
+                            selected_officer_ = officer.slot;
+                        }
+                        ImGui::PopStyleColor();
+                        shown++;
+                    }
+                }
+            }
+            if (shown == 0) {
+                ImGui::TextDisabled("  (no officers assigned)");
+            }
+
+            ImGui::Separator();
+            if (ImGui::Button("View Officer Detail")) {
+                if (selected_officer_ >= 0 && ctx_.sndata) {
+                    ctx_.pending_push = GameContext::PendingState::OfficerDetail;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Battle")) {
+                ctx_.pending_push = GameContext::PendingState::Battle;
+            }
         }
     } else {
         ImGui::Text("Click on a castle to select");
@@ -179,7 +211,7 @@ void MapViewState::render() {
     }
     ImGui::Separator();
     if (ImGui::Button("Return to Menu")) {
-        // Handled by Application
+        ctx_.request_pop = true;
     }
 
     ImGui::End();
@@ -208,16 +240,17 @@ void OfficerDetailState::render() {
         ImGui::Text("Officers: %zu", ctx_.sndata->officer_count());
         ImGui::Separator();
 
-        // Show first few officers as a list
         int count = 0;
         for (const auto& officer : ctx_.sndata->officers) {
-            if (count >= 20) break;
-            std::string label = fmt::format("[{}] id={} {}", officer.slot,
+            if (count >= 30) break;
+            std::string label = fmt::format("[{}] id={} {}",
+                                            officer.slot,
                                             officer.id,
                                             officer.name_utf8.empty()
                                                 ? officer.name_raw
                                                 : officer.name_utf8);
-            if (ImGui::Selectable(label.c_str(), selected_officer_ == officer.slot)) {
+            if (ImGui::Selectable(label.c_str(),
+                                  selected_officer_ == officer.slot)) {
                 selected_officer_ = officer.slot;
             }
             ++count;
@@ -228,12 +261,11 @@ void OfficerDetailState::render() {
 
     ImGui::Separator();
     if (ImGui::Button("Back")) {
-        // Return to map
+        ctx_.request_pop = true;
     }
 
     ImGui::End();
 
-    // Show selected officer details
     if (selected_officer_ >= 0 && ctx_.sndata) {
         for (const auto& officer : ctx_.sndata->officers) {
             if (officer.slot == static_cast<uint32_t>(selected_officer_)) {
@@ -247,11 +279,103 @@ void OfficerDetailState::render() {
                             officer.name_utf8.empty()
                                 ? officer.name_raw.c_str()
                                 : officer.name_utf8.c_str());
+                ImGui::Separator();
+                ImGui::Text("Attributes (attr bytes):");
+                ImGui::BeginChild("AttrBytes", ImVec2(260, 110), true);
+                const auto& attr = officer.attr;
+                for (size_t i = 0; i < attr.size(); ++i) {
+                    uint8_t b = attr[i];
+                    if (i == 18 || i == 19 || i == 22 || i == 23) continue;
+                    ImGui::Text("  [%2u] = %3u (0x%02X)", i, b, b);
+                    if ((i + 1) % 6 == 0) ImGui::Spacing();
+                }
+                ImGui::EndChild();
+                ImGui::Separator();
+                ImGui::Text("Possible attributes (hypothesis):");
+                ImGui::BeginChild("AttrHypo", ImVec2(260, 80), true);
+                auto show_attr = [&](size_t offset, const char* name) {
+                    if (offset < attr.size()) {
+                        uint8_t b = attr[offset];
+                        bool valid = (b != 0xFF && b != 0);
+                        ImGui::TextColored(valid ? ImVec4(0.8f, 0.9f, 1.0f, 1.0f)
+                                                 : ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+                                           "%s [%2u]: %3u", name, offset, b);
+                    }
+                };
+                show_attr(24, "Loyalty?");
+                show_attr(25, "Command?");
+                show_attr(26, "Warfare?");
+                show_attr(27, "Wisdom?");
+                show_attr(28, "Politics?");
+                show_attr(29, "Charm?");
+                ImGui::EndChild();
                 ImGui::End();
                 break;
             }
         }
     }
+}
+
+// ===========================================================================
+// BattleState
+// ===========================================================================
+
+BattleState::BattleState(GameContext& ctx) : ctx_(ctx) {}
+
+void BattleState::enter() {
+    LOG_INFO("BattleState: enter");
+    init_done_ = false;
+}
+
+bool BattleState::update(float dt) {
+    (void)dt;
+    return true;
+}
+
+void BattleState::render() {
+    ImGui::Begin("Battle", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoBackground);
+
+    ImGui::SetWindowPos({0, 0}, ImGuiCond_Always);
+    ImGui::SetWindowSize({(float)ctx_.renderer->get_width(),
+                          (float)ctx_.renderer->get_height()},
+                         ImGuiCond_Always);
+
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    ImVec2 win_pos = ImGui::GetWindowPos();
+    ImVec2 win_size = ImGui::GetWindowSize();
+
+    // Battlefield background
+    draw->AddRectFilled(win_pos,
+                        {win_pos.x + win_size.x, win_pos.y + win_size.y},
+                        IM_COL32(50, 80, 120, 255));
+
+    // Draw grid
+    float grid_size = 40.0f;
+    float start_x = fmodf(win_pos.x, grid_size);
+    float start_y = fmodf(win_pos.y, grid_size);
+    for (float x = start_x; x < win_pos.x + win_size.x; x += grid_size) {
+        draw->AddLine({x, win_pos.y}, {x, win_pos.y + win_size.y},
+                      IM_COL32(60, 100, 140, 60), 1.0f);
+    }
+    for (float y = start_y; y < win_pos.y + win_size.y; y += grid_size) {
+        draw->AddLine({win_pos.x, y}, {win_pos.x + win_size.x, y},
+                      IM_COL32(60, 100, 140, 60), 1.0f);
+    }
+
+    // Title
+    ImGui::SetCursorPos({10, 10});
+    ImGui::TextColored(ImVec4(1, 1, 0, 1), "TACTICAL BATTLE");
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(1, 1, 1, 1), "- ESC to return to map");
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        // Return to map - handled by Application
+    }
+
+    ImGui::End();
 }
 
 } // namespace tensyoki

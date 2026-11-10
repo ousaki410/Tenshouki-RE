@@ -39,6 +39,18 @@ public:
     GT1GTextureCache* tex_cache = nullptr;  // not owned, points to Application's cache
     GameDate date;
     GameClock clock;
+
+    // State transition requests (set by states, processed by Application)
+    enum class PendingState {
+        None,
+        MainMenu,
+        MapView,
+        OfficerDetail,
+        Battle,
+    };
+    PendingState pending_push = PendingState::None;
+    bool request_pop = false;
+    bool request_clear = false;
 };
 
 } // namespace tensyoki

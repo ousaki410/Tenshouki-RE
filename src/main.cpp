@@ -456,12 +456,45 @@ private:
                     }
                     accumulator -= dt;
                 }
-                
+
                 // Advance game clock (date progression)
                 int days = game_ctx_.clock.update(dt, game_ctx_.date);
                 if (days > 0) {
                     LOG_DEBUG("Date advanced {} day(s): {}", days,
                               game_ctx_.date.to_string().c_str());
+                }
+
+                // Process pending state transitions
+                if (game_ctx_.request_clear) {
+                    game_state_mgr_.clear();
+                    game_ctx_.request_clear = false;
+                }
+                if (game_ctx_.request_pop) {
+                    game_state_mgr_.pop();
+                    game_ctx_.request_pop = false;
+                }
+                if (game_ctx_.pending_push != GameContext::PendingState::None) {
+                    switch (game_ctx_.pending_push) {
+                        case GameContext::PendingState::MainMenu:
+                            game_state_mgr_.push(
+                                std::make_unique<MainMenuState>(game_ctx_));
+                            break;
+                        case GameContext::PendingState::MapView:
+                            game_state_mgr_.push(
+                                std::make_unique<MapViewState>(game_ctx_));
+                            break;
+                        case GameContext::PendingState::OfficerDetail:
+                            game_state_mgr_.push(
+                                std::make_unique<OfficerDetailState>(game_ctx_));
+                            break;
+                        case GameContext::PendingState::Battle:
+                            game_state_mgr_.push(
+                                std::make_unique<BattleState>(game_ctx_));
+                            break;
+                        case GameContext::PendingState::None:
+                            break;
+                    }
+                    game_ctx_.pending_push = GameContext::PendingState::None;
                 }
             }
             

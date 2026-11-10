@@ -38,6 +38,7 @@ private:
     GameContext& ctx_;
     MapView map_view_;
     bool init_done_ = false;
+    int selected_officer_ = -1;  // Selected officer from garrison list
 };
 
 /// Officer detail state
@@ -52,6 +53,20 @@ public:
 private:
     GameContext& ctx_;
     int selected_officer_ = -1;
+};
+
+/// Battle state: tactical combat layer
+class BattleState : public GameState {
+public:
+    explicit BattleState(GameContext& ctx);
+    void enter() override;
+    bool update(float dt) override;
+    void render() override;
+    GameStateID id() const override { return GameStateID::Battle; }
+
+private:
+    GameContext& ctx_;
+    bool init_done_ = false;
 };
 
 } // namespace tensyoki
