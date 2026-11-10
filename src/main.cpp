@@ -431,6 +431,10 @@ private:
             // End the frame
             renderer_->end_frame();
             imgui_->render();
+
+            // Render officer card name overlay using TextRenderer (FreeType CJK)
+            render_officer_card_name_overlay();
+
             platform_->swap_buffers();
             
             frame_count++;
@@ -911,22 +915,47 @@ private:
             }
             ImGui::SameLine();
 
-            // Officer info
+            // Officer info (name rendered by TextRenderer overlay instead)
             ImGui::BeginGroup();
             ImGui::Text("Slot: %u", officer.slot);
             ImGui::Text("ID: %u", officer.id);
             ImGui::Text("Status: %u", officer.status);
             ImGui::Text("Gender: %u", officer.gender);
             ImGui::Separator();
-            ImGui::Text("Name (UTF-8): %s",
-                        officer.name_utf8.empty() ? officer.name_raw.c_str()
-                                                  : officer.name_utf8.c_str());
+            ImGui::TextDisabled("Name rendered by FreeType (see overlay)");
             ImGui::EndGroup();
+
+            // Reserve space below for the TextRenderer name overlay
+            ImGui::Dummy(ImVec2(0, 40.0f));
         } else {
             ImGui::Text("Select an officer from Data Table Viewer");
         }
 
         ImGui::End();
+    }
+
+    /// Render the selected officer's name using TextRenderer (FreeType 2 + CJK).
+    /// Called after ImGui render so FreeType text appears on top of ImGui.
+    void render_officer_card_name_overlay() {
+        if (!text_renderer_) return;
+        if (selected_officer_ < 0) return;
+        if (static_cast<size_t>(selected_officer_) >= sndata_loaded_.officer_count()) return;
+
+        const auto& officer = sndata_loaded_.officers[selected_officer_];
+        std::string name = officer.name_utf8.empty()
+            ? officer.name_raw
+            : officer.name_utf8;
+        if (name.empty()) return;
+
+        // Render at screen position below the Officer Card window
+        // (simple fixed offset for now; can be refined to track window pos)
+        text_renderer_->draw(Renderer::TextRenderer::TextParams{
+            .text = name,
+            .position = {10.0f, 60.0f},
+            .size = 32.0f,
+            .color = {1.0f, 0.9f, 0.7f, 1.0f},
+            .wrap_width = 500.0f,
+        });
     }
 
     void render_shader_viewer() {

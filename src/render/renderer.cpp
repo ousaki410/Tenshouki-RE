@@ -330,12 +330,27 @@ void Renderer::draw_indexed(uint32_t index_count, uint32_t instance_count, uint3
     impl_->stats_.triangles += index_count / 3;
 }
 
-void Renderer::draw_indirect(std::shared_ptr<Buffer>, uint32_t, uint32_t, uint32_t) {
-    // TODO: implement
+void Renderer::draw_indirect(std::shared_ptr<Buffer> buffer, uint32_t offset, uint32_t draw_count, uint32_t stride) {
+    if (!buffer) return;
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, buffer->get_id());
+    glBindVertexArray(impl_->default_vao_);
+    glMultiDrawArraysIndirect(GL_TRIANGLES,
+                              reinterpret_cast<const void*>(static_cast<size_t>(offset)),
+                              static_cast<GLsizei>(draw_count),
+                              static_cast<GLsizei>(stride));
+    impl_->stats_.draw_calls++;
+    impl_->stats_.pipeline_binds++;
 }
 
-void Renderer::dispatch_compute(uint32_t, uint32_t, uint32_t) {
-    // TODO: implement
+void Renderer::dispatch_compute(uint32_t groups_x, uint32_t groups_y, uint32_t groups_z) {
+    // The caller is expected to have bound a compute shader pipeline via bind_pipeline()
+    // before calling this function.
+    if (impl_->current_program_ == 0) {
+        LOG_WARN("dispatch_compute: no compute shader program bound; call bind_pipeline() first");
+        return;
+    }
+    glDispatchCompute(groups_x, groups_y, groups_z);
+    impl_->stats_.draw_calls++;
 }
 
 Renderer::Backend Renderer::get_backend() const {
