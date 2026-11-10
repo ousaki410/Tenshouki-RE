@@ -9,6 +9,8 @@
 #include "render/renderer.hpp"
 #include "resource/bin_parser.hpp"
 #include "resource/gt1g_texture_cache.hpp"
+#include "resource/dat_parser.hpp"
+#include "render/shader_compiler.hpp"
 #include "ui/imgui_backend.hpp"
 #include "ui/texture_atlas_viewer.hpp"
 #include "platform/platform.hpp"
@@ -173,6 +175,33 @@ private:
         }
         if (!font_loaded) {
             LOG_WARN("No TrueType font found; text rendering unavailable");
+        }
+
+        // Initialize shader compiler and parse res_shader.bin
+        shader_compiler_ = std::make_unique<ShaderCompiler>();
+        auto shader_path = data_root_ / "res" / "res_shader.bin";
+        if (std::filesystem::exists(shader_path)) {
+            shader_infos_ = shader_compiler_->parse_shader_container(shader_path);
+            LOG_INFO("Parsed {} shaders from res_shader.bin", shader_infos_.size());
+        } else {
+            LOG_WARN("res_shader.bin not found: {}", shader_path.string());
+        }
+
+        // Load scenario data (officers / castles) from sndata1.dat
+        auto sndata_path = data_root_ / "scenario" / "sndata1.dat";
+        if (std::filesystem::exists(sndata_path)) {
+            auto sndata_result = parse_sndata_file(sndata_path, 1);
+            if (sndata_result) {
+                sndata_loaded_ = std::move(*sndata_result);
+                loaded_scenario_ = 1;
+                LOG_INFO("Loaded scenario 1: {} officers, {} castles",
+                         sndata_loaded_.officer_count(), sndata_loaded_.castle_count());
+            } else {
+                LOG_WARN("Failed to parse sndata1.dat: {}",
+                         to_string(sndata_result.error()));
+            }
+        } else {
+            LOG_WARN("sndata1.dat not found: {}", sndata_path.string());
         }
 
         LOG_INFO("Initialization complete");
@@ -494,7 +523,17 @@ private:
             });
             ImGui::End();
         }
-        
+
+        // Shader Viewer
+        if (show_shader_viewer_) {
+            render_shader_viewer();
+        }
+
+        // Data Table Viewer (officers / castles)
+        if (show_dat_viewer_) {
+            render_data_table_viewer();
+        }
+
         // Status bar
         ImGui::Begin("Status", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
         ImGui::SetWindowPos(ImVec2(0, ImGui::GetIO().DisplaySize.y - 25));
@@ -764,6 +803,230 @@ private:
         ImGui::End();
     }
 
+    void render_shader_viewer() {
+        ImGui::Begin("Shader Viewer", &show_shader_viewer_,
+                     ImGuiWindowFlags_AlwaysAutoResize);
+
+        if (shader_infos_.empty()) {
+            ImGui::Text("No shaders parsed from res_shader.bin");
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Text("Shaders: %zu", shader_infos_.size());
+        ImGui::SameLine();
+        if (ImGui::Button("Compile All")) {
+            std::error_code ec;
+            auto out_dir = std::filesystem::path("extracted") / "shaders";
+            shader_compiler_->extract_and_compile_shaders(
+                data_root_ / "res" / "res_shader.bin", out_dir);
+        }
+        ImGui::Separator();
+
+        // Shader list
+        if (ImGui::BeginChild("ShaderList", ImVec2(300, 200), true)) {
+            for (size_t i = 0; i < shader_infos_.size(); ++i) {
+                const auto& info = shader_infos_[i];
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                           (static_cast<int>(i) == selected_shader_
+                                                ? ImGuiTreeNodeFlags_Selected : 0);
+                bool open = ImGui::TreeNodeEx((void*)(intptr_t)i, flags,
+                                              "%s (%s)", info.profile.c_str(),
+                                              info.source_path.empty()
+                                                  ? "(no source)"
+                                                  : info.source_path.c_str());
+                if (ImGui::IsItemClicked()) {
+                    selected_shader_ = static_cast<int>(i);
+                }
+                if (open) {
+                    ImGui::TreePop();
+                }
+            }
+            ImGui::EndChild();
+        }
+
+        ImGui::SameLine();
+
+        // Shader details
+        if (selected_shader_ >= 0 &&
+            static_cast<size_t>(selected_shader_) < shader_infos_.size()) {
+            const auto& info = shader_infos_[selected_shader_];
+            ImGui::BeginChild("ShaderDetails", ImVec2(0, 200), true);
+            ImGui::Text("Entry: %u", info.entry_index);
+            ImGui::Text("Profile: %s", info.profile.c_str());
+            ImGui::Text("Type: %s",
+                        info.is_pixel_shader ? "Pixel Shader" : "Vertex Shader");
+            ImGui::Text("Size: %u bytes", info.size_bytes);
+            ImGui::Text("Source: %s",
+                        info.source_path.empty() ? "(not recorded)" : info.source_path.c_str());
+            ImGui::Separator();
+
+            // Generated GLSL
+            auto glsl = shader_compiler_->generate_glsl_from_d3d9(info);
+            if (!glsl.empty()) {
+                ImGui::Text("Generated GLSL:");
+                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
+                ImGui::BeginChild("GlslSource", ImVec2(0, 120), true);
+                ImGui::TextUnformatted(glsl.c_str());
+                ImGui::EndChild();
+                ImGui::PopStyleColor();
+
+                if (ImGui::Button("Compile this shader")) {
+                    ShaderCompiler::CompileOptions opts;
+                    opts.stage = info.is_pixel_shader
+                                     ? ShaderCompiler::ShaderStage::Fragment
+                                     : ShaderCompiler::ShaderStage::Vertex;
+                    opts.source_lang = ShaderCompiler::SourceLanguage::GLSL;
+                    opts.target_lang = ShaderCompiler::TargetLanguage::GLSL;
+                    auto result = shader_compiler_->compile(glsl, opts);
+                    if (result.success) {
+                        LOG_INFO("Shader {} compiled OK", info.entry_index);
+                    } else {
+                        LOG_WARN("Shader {} compile failed: {}",
+                                 info.entry_index, result.error_message);
+                    }
+                }
+            } else {
+                ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1),
+                                   "GLSL generation not available for this shader type");
+            }
+            ImGui::EndChild();
+        } else {
+            ImGui::Text("Select a shader to view details");
+        }
+
+        ImGui::End();
+    }
+
+    void render_data_table_viewer() {
+        ImGui::Begin("Data Table Viewer", &show_dat_viewer_,
+                     ImGuiWindowFlags_AlwaysAutoResize);
+
+        ImGui::Text("Scenario: %u", loaded_scenario_);
+        ImGui::SameLine();
+        ImGui::Text("Officers: %zu | Castles: %zu",
+                    sndata_loaded_.officer_count(), sndata_loaded_.castle_count());
+        ImGui::Separator();
+
+        // Tab-like selector
+        static int view_tab = 0; // 0 = officers, 1 = castles
+        if (ImGui::RadioButton("Officers", &view_tab, 0)) {
+            selected_castle_ = -1;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Castles", &view_tab, 1)) {
+            selected_officer_ = -1;
+        }
+        ImGui::Separator();
+
+        bool show_officers = (view_tab == 0);
+
+        if (show_officers) {
+            render_officer_list();
+        } else {
+            render_castle_list();
+        }
+
+        ImGui::End();
+    }
+
+    void render_officer_list() {
+        if (ImGui::BeginChild("OfficerList", ImVec2(350, 0), true)) {
+            for (size_t i = 0; i < sndata_loaded_.officer_count(); ++i) {
+                const auto& officer = sndata_loaded_.officers[i];
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                           (selected_officer_ == static_cast<int>(i)
+                                                ? ImGuiTreeNodeFlags_Selected : 0);
+                std::string label = fmt::format("[{}] id={} {}",
+                                                officer.slot, officer.id,
+                                                officer.name_utf8.empty()
+                                                    ? officer.name_raw
+                                                    : officer.name_utf8);
+                bool open = ImGui::TreeNodeEx((void*)(intptr_t)i, flags, "%s", label.c_str());
+                if (ImGui::IsItemClicked()) {
+                    selected_officer_ = static_cast<int>(i);
+                    selected_castle_ = -1;
+                }
+                if (open) ImGui::TreePop();
+            }
+            ImGui::EndChild();
+        }
+
+        ImGui::SameLine();
+
+        if (selected_officer_ >= 0 &&
+            static_cast<size_t>(selected_officer_) < sndata_loaded_.officer_count()) {
+            const auto& officer = sndata_loaded_.officers[selected_officer_];
+            ImGui::BeginChild("OfficerDetails", ImVec2(0, 0), true);
+            ImGui::Text("Slot: %u", officer.slot);
+            ImGui::Text("ID: %u", officer.id);
+            ImGui::Text("Status: %u", officer.status);
+            ImGui::Text("Gender: %u", officer.gender);
+            ImGui::Text("Name (raw): %s", officer.name_raw.c_str());
+            ImGui::Text("Name (UTF-8): %s",
+                        officer.name_utf8.empty() ? "(n/a)" : officer.name_utf8.c_str());
+            ImGui::Text("Attr size: %zu bytes", officer.attr.size());
+            ImGui::Separator();
+            ImGui::Text("Raw attr (hex):");
+            std::string hex;
+            for (uint8_t b : officer.attr) {
+                char buf[4];
+                snprintf(buf, sizeof(buf), "%02X ", b);
+                hex += buf;
+            }
+            ImGui::TextWrapped("%s", hex.c_str());
+            ImGui::EndChild();
+        }
+    }
+
+    void render_castle_list() {
+        if (ImGui::BeginChild("CastleList", ImVec2(350, 0), true)) {
+            for (size_t i = 0; i < sndata_loaded_.castle_count(); ++i) {
+                const auto& castle = sndata_loaded_.castles[i];
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                           (selected_castle_ == static_cast<int>(i)
+                                                ? ImGuiTreeNodeFlags_Selected : 0);
+                std::string label = fmt::format("[{}] {}", castle.index,
+                                                castle.name_utf8.empty()
+                                                    ? castle.name_raw
+                                                    : castle.name_utf8);
+                bool open = ImGui::TreeNodeEx((void*)(intptr_t)i, flags, "%s", label.c_str());
+                if (ImGui::IsItemClicked()) {
+                    selected_castle_ = static_cast<int>(i);
+                    selected_officer_ = -1;
+                }
+                if (open) ImGui::TreePop();
+            }
+            ImGui::EndChild();
+        }
+
+        ImGui::SameLine();
+
+        if (selected_castle_ >= 0 &&
+            static_cast<size_t>(selected_castle_) < sndata_loaded_.castle_count()) {
+            const auto& castle = sndata_loaded_.castles[selected_castle_];
+            ImGui::BeginChild("CastleDetails", ImVec2(0, 0), true);
+            ImGui::Text("Index: %u", castle.index);
+            ImGui::Text("Header[0]: %u", castle.header[0]);
+            ImGui::Text("Header[1]: %u", castle.header[1]);
+            ImGui::Text("Header[2]: %u", castle.header[2]);
+            ImGui::Text("Header[3]: %u", castle.header[3]);
+            ImGui::Text("Name (raw): %s", castle.name_raw.c_str());
+            ImGui::Text("Name (UTF-8): %s",
+                        castle.name_utf8.empty() ? "(n/a)" : castle.name_utf8.c_str());
+            ImGui::Separator();
+            ImGui::Text("Raw tail (hex):");
+            std::string hex;
+            for (uint8_t b : castle.tail) {
+                char buf[4];
+                snprintf(buf, sizeof(buf), "%02X ", b);
+                hex += buf;
+            }
+            ImGui::TextWrapped("%s", hex.c_str());
+            ImGui::EndChild();
+        }
+    }
+
     bool extract_entry_to_disk(const BinArchive& archive, const BinFileEntry& entry) {
         auto result = archive.extract(entry);
         if (!result) {
@@ -838,6 +1101,17 @@ private:
 
     // Text rendering
     std::unique_ptr<Renderer::TextRenderer> text_renderer_;
+
+    // Shader compiler and parsed shader infos
+    std::unique_ptr<ShaderCompiler> shader_compiler_;
+    std::vector<ShaderCompiler::D3D9ShaderInfo> shader_infos_;
+    int selected_shader_ = -1;
+
+    // Scenario data (officers / castles)
+    SndataArchive sndata_loaded_;
+    uint32_t loaded_scenario_ = 0;
+    int selected_officer_ = -1;
+    int selected_castle_ = -1;
 };
 
 } // namespace tensyoki

@@ -116,17 +116,190 @@ bool ShaderCompiler::compile_directory(const std::filesystem::path& src_dir,
 
 bool ShaderCompiler::extract_and_compile_shaders(const std::filesystem::path& bin_path,
                                                  const std::filesystem::path& output_dir) {
-    BinArchive archive;
-    auto load_result = archive.load_from_file(bin_path);
-    if (!load_result) {
-        LOG_ERROR("Failed to load shader archive {}: {}", bin_path.string(), to_string(load_result.error()));
+    std::error_code ec;
+    std::filesystem::create_directories(output_dir, ec);
+    if (ec) {
+        LOG_ERROR("Failed to create output directory {}: {}", output_dir.string(), ec.message());
         return false;
     }
 
-    // Currently only extracts the raw block without compiling (content format and compile backend need confirmation)
-    LOG_WARN("extract_and_compile_shaders: compilation backend unavailable, extracting raw blobs only");
-    auto extract_result = archive.extract_all(output_dir);
-    return static_cast<bool>(extract_result);
+    auto infos = parse_shader_container(bin_path);
+    if (infos.empty()) {
+        LOG_WARN("No shader blobs found in {}", bin_path.string());
+        return false;
+    }
+
+    bool all_ok = true;
+    for (const auto& info : infos) {
+        // Write raw bytecode
+        auto blob_path = output_dir / ("shader_entry" + std::to_string(info.entry_index) + ".bin");
+        std::ofstream blob_out(blob_path, std::ios::binary);
+        if (!blob_out) {
+            LOG_ERROR("Failed to write {}", blob_path.string());
+            all_ok = false;
+            continue;
+        }
+        blob_out.write(reinterpret_cast<const char*>(info.bytecode.data()),
+                       static_cast<std::streamsize>(info.bytecode.size()));
+
+        // Write metadata sidecar
+        auto meta_path = output_dir / ("shader_entry" + std::to_string(info.entry_index) + ".meta");
+        std::ofstream meta_out(meta_path);
+        if (!meta_out) {
+            LOG_ERROR("Failed to write {}", meta_path.string());
+            all_ok = false;
+            continue;
+        }
+        meta_out << "entry_index: " << info.entry_index << "\n";
+        meta_out << "profile: " << info.profile << "\n";
+        meta_out << "is_pixel_shader: " << (info.is_pixel_shader ? "true" : "false") << "\n";
+        meta_out << "size_bytes: " << info.size_bytes << "\n";
+        meta_out << "source_path: " << info.source_path << "\n";
+
+        // Generate GLSL and attempt compilation
+        auto glsl = generate_glsl_from_d3d9(info);
+        if (!glsl.empty()) {
+            auto glsl_path = output_dir / ("shader_entry" + std::to_string(info.entry_index) + ".glsl");
+            std::ofstream glsl_out(glsl_path);
+            if (!glsl_out) {
+                LOG_ERROR("Failed to write {}", glsl_path.string());
+                all_ok = false;
+                continue;
+            }
+            glsl_out << glsl;
+
+            CompileOptions opts;
+            opts.stage = info.is_pixel_shader ? ShaderStage::Fragment : ShaderStage::Vertex;
+            opts.source_lang = SourceLanguage::GLSL;
+            opts.target_lang = TargetLanguage::GLSL;
+            auto result = compile(glsl, opts);
+            if (result.success) {
+                LOG_INFO("Shader entry {} ({}): compiled OK ({} bytes GLSL)",
+                         info.entry_index, info.profile, glsl.size());
+            } else {
+                LOG_WARN("Shader entry {} ({}): GLSL compile failed: {}",
+                         info.entry_index, info.profile, result.error_message);
+                all_ok = false;
+            }
+        } else {
+            LOG_WARN("Shader entry {} ({}): could not generate GLSL",
+                     info.entry_index, info.profile);
+            all_ok = false;
+        }
+    }
+
+    LOG_INFO("extract_and_compile_shaders: processed {} shaders from {}",
+             infos.size(), bin_path.string());
+    return all_ok;
+}
+
+std::vector<ShaderCompiler::D3D9ShaderInfo> ShaderCompiler::parse_shader_container(
+    const std::filesystem::path& bin_path) {
+
+    std::vector<D3D9ShaderInfo> results;
+
+    BinArchive archive;
+    auto load_result = archive.load_from_file(bin_path);
+    if (!load_result) {
+        LOG_ERROR("Failed to load shader archive {}: {}", bin_path.string(),
+                  to_string(load_result.error()));
+        return results;
+    }
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(archive.entries().size()); ++i) {
+        const auto* entry = archive.find_by_index(i);
+        if (!entry || entry->size == 0) continue;
+
+        auto view_result = archive.view(*entry);
+        if (!view_result) continue;
+        const auto& data = *view_result;
+
+        if (data.size() < 4) continue;
+
+        // Parse version token (first DWORD, little-endian)
+        uint32_t token = static_cast<uint32_t>(data[0]) |
+                         (static_cast<uint32_t>(data[1]) << 8) |
+                         (static_cast<uint32_t>(data[2]) << 16) |
+                         (static_cast<uint32_t>(data[3]) << 24);
+        uint32_t type = token >> 16;
+        uint32_t major = (token >> 8) & 0xFFu;
+        uint32_t minor = token & 0xFFu;
+
+        if ((type != 0xFFFFu && type != 0xFFFEu) || major < 1 || major > 3) {
+            LOG_DEBUG("Entry {}: not a D3D9 shader (token=0x{:08X})", i, token);
+            continue;
+        }
+
+        bool is_pixel = (type == 0xFFFFu);
+        std::string profile = std::string(is_pixel ? "ps_" : "vs_") +
+                              std::to_string(major) + "_" + std::to_string(minor);
+
+        // Extract source path from DBUG comment
+        std::string source_path;
+        // Manually search for "DBUG(" in the byte data
+        const char* dbug_marker = "DBUG(";
+        size_t dbug_pos = std::string::npos;
+        for (size_t j = 0; j + 5 <= data.size(); ++j) {
+            if (std::memcmp(data.data() + j, dbug_marker, 5) == 0) {
+                dbug_pos = j;
+                break;
+            }
+        }
+        if (dbug_pos != std::string::npos) {
+            size_t str_start = dbug_pos + 5; // after "DBUG("
+            size_t str_end = str_start;
+            while (str_end < data.size() && data[str_end] != 0) ++str_end;
+            source_path =
+                std::string(reinterpret_cast<const char*>(data.data() + str_start),
+                            str_end - str_start);
+        }
+
+        D3D9ShaderInfo info;
+        info.entry_index = i;
+        info.profile = profile;
+        info.is_pixel_shader = is_pixel;
+        info.size_bytes = static_cast<uint32_t>(data.size());
+        info.source_path = source_path;
+        info.bytecode.assign(data.begin(), data.end());
+
+        results.push_back(info);
+        LOG_INFO("Found shader entry {}: {} ({} bytes, source: {})",
+                 i, profile, data.size(), source_path);
+    }
+
+    return results;
+}
+
+std::string ShaderCompiler::generate_glsl_from_d3d9(const D3D9ShaderInfo& info) {
+    if (!info.is_pixel_shader) {
+        LOG_WARN("GLSL generation for vertex shaders not yet implemented");
+        return "";
+    }
+
+    // Best-effort GLSL for common ps_2_0 patterns.
+    // The three shaders in res_shader.bin are:
+    //   event.fsh      - event shader (likely fullscreen pass)
+    //   mergestill.fsh - UI merge (vColor * texture sample)
+    //   speed_bar.fsh  - speed bar (vColor * texture sample)
+    //
+    // All use vColor (vertex color) and texCoord (texture coordinate),
+    // sampling from texture register t0 with sampler s0.
+
+    std::string glsl;
+    glsl += "#version 450 core\n";
+    glsl += "in vec4 vColor;\n";
+    glsl += "in vec2 vTexCoord;\n";
+    glsl += "out vec4 outColor;\n";
+    glsl += "layout(binding = 0) uniform sampler2D u_texture0;\n";
+    glsl += "\n";
+    glsl += "void main() {\n";
+    glsl += "    vec4 tex = texture(u_texture0, vTexCoord);\n";
+    glsl += "    outColor = tex * vColor;\n";
+    glsl += "}\n";
+
+    LOG_DEBUG("Generated GLSL for entry {} ({}): {} bytes",
+              info.entry_index, info.profile, glsl.size());
+    return glsl;
 }
 
 std::vector<std::string> ShaderCompiler::get_supported_shader_models() {

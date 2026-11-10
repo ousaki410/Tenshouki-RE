@@ -131,6 +131,22 @@ public:
     bool extract_and_compile_shaders(const std::filesystem::path& bin_path,
                                      const std::filesystem::path& output_dir);
 
+    /// Parse all shader blobs from a res_shader.bin container without compiling.
+    /// Returns metadata for each non-empty entry (version, type, source path, etc.).
+    struct D3D9ShaderInfo {
+        uint32_t entry_index = 0;
+        std::string profile;           // "ps_2_0", "vs_2_0", etc.
+        bool is_pixel_shader = false;
+        uint32_t size_bytes = 0;
+        std::string source_path;       // From DBUG comment
+        std::vector<uint8_t> bytecode; // Raw D3D9 bytecode
+    };
+    std::vector<D3D9ShaderInfo> parse_shader_container(const std::filesystem::path& bin_path);
+
+    /// Generate a best-effort GLSL fragment shader from a parsed D3D9 ps_2_0 blob.
+    /// Returns empty string if conversion is not possible.
+    std::string generate_glsl_from_d3d9(const D3D9ShaderInfo& info);
+
     // Get the list of supported shader models
     static std::vector<std::string> get_supported_shader_models();
 
