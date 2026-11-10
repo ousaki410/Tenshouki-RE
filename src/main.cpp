@@ -204,6 +204,29 @@ private:
             LOG_WARN("sndata1.dat not found: {}", sndata_path.string());
         }
 
+        // Load res_grp.bin for officer portrait textures
+        auto grp_path = data_root_ / "res" / "res_grp.bin";
+        if (std::filesystem::exists(grp_path)) {
+            grp_archive_ = std::make_unique<BinArchive>();
+            auto grp_result = grp_archive_->load_from_file(grp_path);
+            if (grp_result) {
+                LOG_INFO("Loaded res_grp.bin: {} entries", grp_archive_->entries().size());
+                // Load first GT1G texture from entry 0 as default portrait
+                if (grp_archive_->entries().size() > 0) {
+                    officer_portrait_ = texture_cache_.get_or_load(
+                        *renderer_, "res_grp.bin", *grp_archive_, 0);
+                    if (officer_portrait_) {
+                        LOG_INFO("Loaded officer portrait texture from res_grp.bin entry 0");
+                    }
+                }
+            } else {
+                LOG_WARN("Failed to load res_grp.bin: {}",
+                         to_string(grp_result.error()));
+            }
+        } else {
+            LOG_WARN("res_grp.bin not found: {}", grp_path.string());
+        }
+
         LOG_INFO("Initialization complete");
         return true;
     }
@@ -444,6 +467,7 @@ private:
                 ImGui::MenuItem("Texture Atlas Viewer", nullptr, &show_atlas_viewer_);
                 ImGui::MenuItem("Shader Viewer", nullptr, &show_shader_viewer_);
                 ImGui::MenuItem("Data Table Viewer", nullptr, &show_dat_viewer_);
+                ImGui::MenuItem("Officer Card", nullptr, &show_officer_card_);
                 ImGui::EndMenu();
             }
             
@@ -532,6 +556,11 @@ private:
         // Data Table Viewer (officers / castles)
         if (show_dat_viewer_) {
             render_data_table_viewer();
+        }
+
+        // Officer Card (texture + text render demo)
+        if (show_officer_card_) {
+            render_officer_card();
         }
 
         // Status bar
@@ -799,6 +828,46 @@ private:
         ImVec2 size((float)preview_width_, (float)preview_height_);
         ImGui::Image(static_cast<ImTextureID>(preview_texture_->get_id()), size, uv0, uv1,
                      ImVec4(1, 1, 1, 1), ImVec4(0, 0, 0, 0));
+
+        ImGui::End();
+    }
+
+    void render_officer_card() {
+        ImGui::Begin("Officer Card", &show_officer_card_,
+                     ImGuiWindowFlags_AlwaysAutoResize);
+
+        if (!officer_portrait_) {
+            ImGui::Text("No portrait texture loaded. Load res_grp.bin first.");
+            ImGui::End();
+            return;
+        }
+
+        if (selected_officer_ >= 0 &&
+            static_cast<size_t>(selected_officer_) < sndata_loaded_.officer_count()) {
+            const auto& officer = sndata_loaded_.officers[selected_officer_];
+
+            // Display portrait texture (from res_grp.bin entry 0 GT1G)
+            ImVec2 uv0(0, 1);
+            ImVec2 uv1(1, 0);
+            ImVec2 size(256.0f, 256.0f);
+            ImGui::Image(static_cast<ImTextureID>(officer_portrait_->get_id()), size, uv0, uv1,
+                         ImVec4(1, 1, 1, 1), ImVec4(0, 0, 0, 0));
+            ImGui::SameLine();
+
+            // Officer info
+            ImGui::BeginGroup();
+            ImGui::Text("Slot: %u", officer.slot);
+            ImGui::Text("ID: %u", officer.id);
+            ImGui::Text("Status: %u", officer.status);
+            ImGui::Text("Gender: %u", officer.gender);
+            ImGui::Separator();
+            ImGui::Text("Name (UTF-8): %s",
+                        officer.name_utf8.empty() ? officer.name_raw.c_str()
+                                                  : officer.name_utf8.c_str());
+            ImGui::EndGroup();
+        } else {
+            ImGui::Text("Select an officer from Data Table Viewer");
+        }
 
         ImGui::End();
     }
@@ -1103,6 +1172,7 @@ void main() {
     bool show_dat_viewer_ = false;
     bool show_atlas_viewer_ = false;
     bool show_texture_viewer_ = false;
+    bool show_officer_card_ = false;
     bool check_resources_ = false;
     bool help_requested_ = false;
 
@@ -1132,6 +1202,11 @@ void main() {
     uint32_t loaded_scenario_ = 0;
     int selected_officer_ = -1;
     int selected_castle_ = -1;
+
+    // Officer card preview (texture from res_grp.bin entry 0 GT1G)
+    std::unique_ptr<BinArchive> grp_archive_;
+    std::shared_ptr<Renderer::Texture> officer_portrait_;
+    int portrait_texture_index_ = 0;
 };
 
 } // namespace tensyoki

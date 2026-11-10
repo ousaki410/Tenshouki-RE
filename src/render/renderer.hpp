@@ -266,21 +266,28 @@ public:
         size_t size_ = 0;
     };
 
+    class Shader;  // forward declaration for Pipeline::set_shader
+
     class Pipeline {
     public:
         Pipeline() = default;
         ~Pipeline() = default;
 
         bool create(const PipelineCreateInfo& info) {
-            // Minimal implementation: stores config only; shader compilation is handled by Shader
+            // Minimal implementation: stores config; shader program is bound at bind_pipeline()
             info_ = info;
             return true;
         }
 
+        /// Attach a compiled shader program to this pipeline
+        void set_shader(std::shared_ptr<Shader> shader) { shader_ = std::move(shader); }
+
         const PipelineCreateInfo& get_info() const { return info_; }
+        std::shared_ptr<Shader> get_shader() const { return shader_; }
 
     private:
         PipelineCreateInfo info_;
+        std::shared_ptr<Shader> shader_;
     };
 
     class Shader {

@@ -14,6 +14,8 @@
 #include <utility>
 #include <unordered_map>
 #include <cstring>
+#include <fstream>
+#include <cstring>
 
 namespace tensyoki {
 
@@ -268,13 +270,15 @@ std::shared_ptr<Renderer::Shader> Renderer::create_shader_from_glsl(
 
 void Renderer::bind_pipeline(std::shared_ptr<Pipeline> pipeline) {
     if (!pipeline) return;
-    // For now, Pipeline doesn't own a program; bind the default blit program.
-    // In the future, Pipeline can carry a Shader* and we bind its program.
-    if (impl_->blit_program_) {
+    auto shader = pipeline->get_shader();
+    if (shader) {
+        glUseProgram(shader->get_id());
+        impl_->current_program_ = shader->get_id();
+    } else if (impl_->blit_program_) {
         glUseProgram(impl_->blit_program_);
         impl_->current_program_ = impl_->blit_program_;
-        impl_->stats_.pipeline_binds++;
     }
+    impl_->stats_.pipeline_binds++;
 }
 
 void Renderer::bind_vertex_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset) {
@@ -366,9 +370,74 @@ void Renderer::insert_debug_marker(const std::string& marker) {
                          GL_DEBUG_SEVERITY_NOTIFICATION, static_cast<GLsizei>(marker.size()), marker.c_str());
 }
 
-bool Renderer::capture_screenshot(const std::filesystem::path&) {
-    // TODO: implement screenshot
-    return false;
+bool Renderer::capture_screenshot(const std::filesystem::path& path) {
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    int w = viewport[2];
+    int h = viewport[3];
+
+    // Read pixels (RGBA, byte alignment 1)
+    std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+    // BMP header (little-endian, 24-bit RGB, bottom-up)
+    const size_t row_size = static_cast<size_t>((w * 3 + 3) & ~3);  // 4-byte aligned rows
+    const size_t image_size = row_size * h;
+    const size_t file_size = 54 + image_size;
+
+    std::vector<uint8_t> bmp(file_size, 0);
+    // BM signature
+    bmp[0] = 'B'; bmp[1] = 'M';
+    // file size
+    bmp[2] = static_cast<uint8_t>(file_size & 0xFF);
+    bmp[3] = static_cast<uint8_t>((file_size >> 8) & 0xFF);
+    bmp[4] = static_cast<uint8_t>((file_size >> 16) & 0xFF);
+    bmp[5] = static_cast<uint8_t>((file_size >> 24) & 0xFF);
+    // reserved
+    bmp[10] = 54;  // offset to pixel data
+    // DIB header size (40)
+    bmp[14] = 40;
+    // width
+    bmp[18] = static_cast<uint8_t>(w & 0xFF);
+    bmp[19] = static_cast<uint8_t>((w >> 8) & 0xFF);
+    bmp[20] = static_cast<uint8_t>((w >> 16) & 0xFF);
+    bmp[21] = static_cast<uint8_t>((w >> 24) & 0xFF);
+    // height (negative = top-down)
+    int32_t neg_h = -h;
+    std::memcpy(bmp.data() + 22, &neg_h, 4);
+    // planes = 1
+    bmp[26] = 1;
+    // bit count = 24
+    bmp[28] = 24;
+
+    // Convert RGBA -> BGR, flip vertically (BMP is bottom-up)
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            size_t src = (static_cast<size_t>(y) * w + x) * 4;
+            uint8_t r = pixels[src + 0];
+            uint8_t g = pixels[src + 1];
+            uint8_t b = pixels[src + 2];
+            size_t dst_row = static_cast<size_t>(h - 1 - y) * row_size;
+            size_t dst = dst_row + static_cast<size_t>(x) * 3;
+            bmp[54 + dst + 0] = b;  // B
+            bmp[54 + dst + 1] = g;  // G
+            bmp[54 + dst + 2] = r;  // R
+        }
+    }
+
+    std::error_code ec;
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        LOG_ERROR("Failed to write screenshot: {}", path.string());
+        return false;
+    }
+    out.write(reinterpret_cast<const char*>(bmp.data()), static_cast<std::streamsize>(bmp.size()));
+    if (!out) {
+        LOG_ERROR("Failed to write screenshot: {}", path.string());
+        return false;
+    }
+    LOG_INFO("Screenshot saved: {} ({}x{})", path.string(), w, h);
+    return true;
 }
 
 Renderer::Stats Renderer::get_stats() const {
