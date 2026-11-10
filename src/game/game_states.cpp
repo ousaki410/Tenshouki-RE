@@ -592,6 +592,10 @@ void BattleState::enter() {
     init_done_ = true;
     selected_unit_id_ = -1;
     show_move_range_ = false;
+    show_skill_range_ = false;
+    selected_action_ = 0;
+    selected_skill_idx_ = 0;
+    show_settlement_ = false;
 }
 
 bool BattleState::update(float dt) {
@@ -651,6 +655,8 @@ bool BattleState::update(float dt) {
     attackable_cells_.clear();
     // Recalculate ranged attackable cells
     ranged_attackable_cells_.clear();
+    // Recalculate skill range cells
+    skill_range_cells_.clear();
     if (selected_unit_id_ >= 0) {
         BattleUnit* unit = nullptr;
         for (auto& u : battle_data_.units()) {
@@ -673,6 +679,16 @@ bool BattleState::update(float dt) {
                     } else {
                         ranged_attackable_cells_.push_back({target.grid_x, target.grid_y});
                     }
+                }
+            }
+
+            // Calculate skill range if skill action is selected
+            if (selected_action_ == 2) {
+                auto skills = unit->get_available_skills();
+                if (selected_skill_idx_ >= 0 &&
+                    selected_skill_idx_ < static_cast<int>(skills.size())) {
+                    const auto& skill = skills[selected_skill_idx_];
+                    skill_range_cells_ = battle_data_.get_skill_range(*unit, skill);
                 }
             }
         }
@@ -760,6 +776,40 @@ void BattleState::render() {
                                 IM_COL32(255, 180, 80, 90));
             draw->AddRect({sx, sy}, {sx + cell_size, sy + cell_size},
                           IM_COL32(255, 160, 80, 200), 0.0f, 0, 2.0f);
+        }
+    }
+
+    // --- Render skill range highlight (purple) ---
+    if (selected_unit_id_ >= 0 && selected_action_ == 2 && show_skill_range_) {
+        BattleUnit* unit = nullptr;
+        for (auto& u : battle_data_.units()) {
+            if (u.id == (uint32_t)selected_unit_id_) {
+                unit = &u;
+                break;
+            }
+        }
+        if (unit) {
+            auto skills = unit->get_available_skills();
+            if (selected_skill_idx_ >= 0 &&
+                selected_skill_idx_ < static_cast<int>(skills.size())) {
+                const auto& skill = skills[selected_skill_idx_];
+                ImU32 skill_col = skill.target_enemy
+                    ? IM_COL32(255, 100, 255, 90)
+                    : IM_COL32(100, 100, 255, 90);
+                ImU32 skill_border = skill.target_enemy
+                    ? IM_COL32(255, 100, 255, 200)
+                    : IM_COL32(100, 100, 255, 200);
+                for (const auto& [sx, sy] : skill_range_cells_) {
+                    float fx = (float)sx * cell_size + screen_cx -
+                               (float)battle_data_.grid_width() / 2.0f * cell_size;
+                    float fy = (float)sy * cell_size + screen_cy -
+                               (float)battle_data_.grid_height() / 2.0f * cell_size;
+                    draw->AddRectFilled({fx, fy}, {fx + cell_size, fy + cell_size},
+                                        skill_col);
+                    draw->AddRect({fx, fy}, {fx + cell_size, fy + cell_size},
+                                  skill_border, 0.0f, 0, 2.0f);
+                }
+            }
         }
     }
 
@@ -943,9 +993,36 @@ void BattleState::render() {
                 if (ImGui::Selectable(actions[i], selected)) {
                     selected_action_ = i;
                     show_move_range_ = false;
+                    show_skill_range_ = false;
                 }
                 if (!available) ImGui::PopStyleColor();
                 if (i < 3) ImGui::SameLine();
+            }
+
+            // Skill selection (only when Skill action is selected)
+            if (selected_action_ == 2 && !unit->has_acted) {
+                auto skills = unit->get_available_skills();
+                if (!skills.empty()) {
+                    ImGui::Separator();
+                    ImGui::Text("Select Skill:");
+                    for (size_t i = 0; i < skills.size(); ++i) {
+                        const auto& s = skills[i];
+                        bool skill_selected = (selected_skill_idx_ == (int)i);
+                        bool affordable = unit->morale >= s.morale_cost;
+                        std::string skill_label = fmt::format(
+                            "{} (Morale: {}){}", s.name, s.morale_cost,
+                            affordable ? "" : " [Insufficient Morale]");
+                        if (!affordable) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+                        if (ImGui::Selectable(skill_label.c_str(), skill_selected)) {
+                            selected_skill_idx_ = (int)i;
+                            show_skill_range_ = true;
+                            show_move_range_ = false;
+                        }
+                        if (!affordable) ImGui::PopStyleColor();
+                        ImGui::SameLine();
+                        ImGui::TextWrapped("%s", s.description.c_str());
+                    }
+                }
             }
 
             if (!unit->has_acted && unit->move_left > 0) {
@@ -961,10 +1038,13 @@ void BattleState::render() {
                 battle_data_.next_turn();
                 selected_unit_id_ = -1;
                 show_move_range_ = false;
+                show_skill_range_ = false;
                 selected_action_ = 0;
+                selected_skill_idx_ = 0;
                 movable_cells_.clear();
                 attackable_cells_.clear();
                 ranged_attackable_cells_.clear();
+                skill_range_cells_.clear();
             }
         }
     } else {
@@ -997,6 +1077,62 @@ void BattleState::render() {
         ctx_.request_pop = true;
     }
 
+    // Battle settlement dialog
+    if (battle_data_.result() != BattleResult::Ongoing && !show_settlement_) {
+        show_settlement_ = true;
+    }
+    if (show_settlement_) {
+        auto settlement = battle_data_.get_settlement();
+        ImGui::OpenPopup("Battle Settlement");
+        if (ImGui::BeginPopupModal("Battle Settlement", &show_settlement_,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            const char* result_text;
+            ImVec4 result_col;
+            switch (settlement.result) {
+                case BattleResult::PlayerVictory:
+                    result_text = "VICTORY";
+                    result_col = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+                    break;
+                case BattleResult::PlayerDefeat:
+                    result_text = "DEFEAT";
+                    result_col = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+                    break;
+                default:
+                    result_text = "DRAW";
+                    result_col = ImVec4(1.0f, 1.0f, 0.4f, 1.0f);
+                    break;
+            }
+            ImGui::TextColored(result_col, "Battle Result: %s", result_text);
+            ImGui::Separator();
+            ImGui::Text("Enemies Defeated: %d", settlement.enemies_defeated);
+            ImGui::Text("Enemies Captured: %d", settlement.enemies_captured);
+            ImGui::Text("Player Units Lost: %d", settlement.player_units_lost);
+            ImGui::Text("Total EXP Gained: %d", settlement.total_exp_gained);
+            ImGui::Text("Total Gold Gained: %d", settlement.total_gold_gained);
+            ImGui::Separator();
+            if (!settlement.level_ups.empty()) {
+                ImGui::Text("Level Ups:");
+                for (const auto& lu : settlement.level_ups) {
+                    ImGui::BulletText("%s", lu.c_str());
+                }
+                ImGui::Separator();
+            }
+            if (!settlement.captured_officer_ids.empty()) {
+                ImGui::Text("Captured Officers:");
+                for (auto oid : settlement.captured_officer_ids) {
+                    ImGui::BulletText("Officer ID %u", oid);
+                }
+                ImGui::Separator();
+            }
+            if (ImGui::Button("OK", {100, 0})) {
+                ImGui::CloseCurrentPopup();
+                show_settlement_ = false;
+                ctx_.request_pop = true;
+            }
+            ImGui::EndPopup();
+        }
+    }
+
     ImGui::End();
 
     // Handle mouse clicks for unit selection and movement/attack
@@ -1017,7 +1153,7 @@ void BattleState::render() {
                 show_move_range_ = true;
                 selected_action_ = 0;
             } else if (selected_unit_id_ >= 0) {
-                // Try to attack selected unit
+                // Try to use skill or attack selected unit
                 BattleUnit* attacker = nullptr;
                 for (auto& u : battle_data_.units()) {
                     if (u.id == (uint32_t)selected_unit_id_) {
@@ -1028,8 +1164,10 @@ void BattleState::render() {
                 if (!attacker || attacker->has_acted) {
                     selected_unit_id_ = -1;
                     show_move_range_ = false;
+                    show_skill_range_ = false;
                     attackable_cells_.clear();
                     ranged_attackable_cells_.clear();
+                    skill_range_cells_.clear();
                 } else if (selected_action_ == 0) {
                     // Melee attack
                     int32_t dist = std::abs(attacker->grid_x - gx) +
@@ -1038,10 +1176,12 @@ void BattleState::render() {
                         int dmg = battle_data_.attack(*attacker, *unit);
                         selected_unit_id_ = -1;
                         show_move_range_ = false;
+                        show_skill_range_ = false;
                         selected_action_ = 0;
                         movable_cells_.clear();
                         attackable_cells_.clear();
                         ranged_attackable_cells_.clear();
+                        skill_range_cells_.clear();
                     }
                 } else if (selected_action_ == 1) {
                     // Ranged attack (archers only)
@@ -1054,10 +1194,34 @@ void BattleState::render() {
                             int dmg = battle_data_.ranged_attack(*attacker, *unit);
                             selected_unit_id_ = -1;
                             show_move_range_ = false;
+                            show_skill_range_ = false;
                             selected_action_ = 0;
                             movable_cells_.clear();
                             attackable_cells_.clear();
                             ranged_attackable_cells_.clear();
+                            skill_range_cells_.clear();
+                        }
+                    }
+                } else if (selected_action_ == 2) {
+                    // Skill usage
+                    auto skills = attacker->get_available_skills();
+                    if (selected_skill_idx_ >= 0 &&
+                        selected_skill_idx_ < static_cast<int>(skills.size())) {
+                        const auto& skill = skills[selected_skill_idx_];
+                        if (battle_data_.is_in_skill_range(
+                                attacker->grid_x, attacker->grid_y, gx, gy,
+                                skill)) {
+                            int dmg = battle_data_.use_skill(
+                                *attacker, skill, gx, gy);
+                            selected_unit_id_ = -1;
+                            show_move_range_ = false;
+                            show_skill_range_ = false;
+                            selected_action_ = 0;
+                            selected_skill_idx_ = 0;
+                            movable_cells_.clear();
+                            attackable_cells_.clear();
+                            ranged_attackable_cells_.clear();
+                            skill_range_cells_.clear();
                         }
                     }
                 }
@@ -1091,9 +1255,11 @@ void BattleState::render() {
                         attacker->has_acted = true;
                     }
                     show_move_range_ = false;
+                    show_skill_range_ = false;
                     movable_cells_.clear();
                     attackable_cells_.clear();
                     ranged_attackable_cells_.clear();
+                    skill_range_cells_.clear();
                 }
             }
         }

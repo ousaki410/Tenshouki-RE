@@ -42,6 +42,29 @@ enum class ActionType {
     Wait,     // Pass turn without acting
 };
 
+/// Skill type determines the effect
+enum class SkillType {
+    None,
+    Heal,           // Restore HP to self or adjacent ally
+    MoraleBoost,    // Restore morale to self or adjacent ally
+    PowerStrike,    // Strong melee attack (high damage, high morale cost)
+    Guard,          // Temporary defense boost for self
+    Inspire,        // Boost attack of adjacent allies
+    RainOfArrows,   // Archer-only: damage all enemies in range 3
+};
+
+/// Skill definition
+struct BattleSkill {
+    SkillType type = SkillType::None;
+    std::string name;
+    std::string description;
+    int32_t morale_cost = 0;   // Morale required to use
+    int32_t range = 1;         // Skill range in tiles
+    bool target_enemy = false; // Whether skill targets enemies
+    bool aoe = false;          // Area of effect
+    int32_t aoe_radius = 1;    // AOE radius if applicable
+};
+
 /// Combat unit (a squadron led by an officer)
 struct BattleUnit {
     uint32_t id = 0;
@@ -59,6 +82,7 @@ struct BattleUnit {
     int32_t move_left = 3;   // Movement remaining this turn
     int32_t attack_range = 1; // Attack range in tiles
     bool has_acted = false;  // Has acted this turn
+    bool used_skill = false; // Has used skill this turn
 
     // Morale system (0-100, affects combat performance)
     int32_t morale = 50;
@@ -94,6 +118,9 @@ struct BattleUnit {
         }
         return 1;
     }
+
+    // Get available skills based on unit type and level
+    std::vector<BattleSkill> get_available_skills() const;
 };
 
 /// Single terrain cell on the battlefield
@@ -115,6 +142,19 @@ struct BattleEvent {
     std::string message;
     bool is_player_action = true;
     int32_t damage = 0;
+    bool is_skill = false;
+};
+
+/// Battle result summary for post-battle settlement
+struct BattleSettlement {
+    BattleResult result = BattleResult::Ongoing;
+    int32_t total_exp_gained = 0;
+    int32_t total_gold_gained = 0;
+    int32_t enemies_defeated = 0;
+    int32_t enemies_captured = 0;
+    int32_t player_units_lost = 0;
+    std::vector<std::string> level_ups;  // Unit names that leveled up
+    std::vector<uint32_t> captured_officer_ids;  // IDs of captured enemy officers
 };
 
 /// Tactical battle state machine
@@ -158,6 +198,21 @@ public:
     // Check if position is within ranged attack range (2-3 tiles)
     bool is_in_ranged_range(int32_t ax, int32_t ay,
                             int32_t tx, int32_t ty) const;
+
+    // Execute a skill from attacker to target(s), returns damage dealt or 0 for non-damage skills
+    int32_t use_skill(BattleUnit& user, const BattleSkill& skill,
+                      int32_t tx, int32_t ty);
+
+    // Get skill range highlight cells
+    std::vector<std::pair<int32_t, int32_t>> get_skill_range(
+        const BattleUnit& user, const BattleSkill& skill) const;
+
+    // Check if position is within skill range
+    bool is_in_skill_range(int32_t ax, int32_t ay, int32_t tx, int32_t ty,
+                           const BattleSkill& skill) const;
+
+    // Get battle settlement (called after battle ends)
+    BattleSettlement get_settlement() const;
 
     // Getters
     int32_t grid_width() const { return grid_width_; }
@@ -205,6 +260,7 @@ private:
     int32_t selected_action_ = 0;  // 0=Attack, 1=Ranged, 2=Skill, 3=Wait
     uint32_t next_unit_id_ = 1;
     std::vector<BattleEvent> events_;
+    BattleSettlement settlement_;
 
     // Helper: index into terrain grid
     int32_t idx(int32_t x, int32_t y) const { return y * grid_width_ + x; }
@@ -214,10 +270,19 @@ private:
 
     // Add a battle event to the log
     void add_event(const std::string& message, bool is_player_action,
-                   int32_t damage = 0);
+                   int32_t damage = 0, bool is_skill = false);
 
-    // Check win conditions
+    // Check win conditions and build settlement
     void check_win_conditions();
+
+    // Build settlement data after battle ends
+    void build_settlement();
+
+    // Grant experience to a unit, returns true if leveled up
+    bool grant_exp(BattleUnit& unit, int32_t exp_amount);
+
+    // Level up a unit
+    void level_up(BattleUnit& unit);
 
     // AI helper: get mutable unit by ID
     BattleUnit* get_unit_by_id(uint32_t id);

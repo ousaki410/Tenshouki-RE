@@ -88,13 +88,19 @@ private:
     bool init_done_ = false;
     int selected_unit_id_ = -1;   // Currently selected unit ID
     int selected_action_ = 0;     // 0=Melee, 1=Ranged, 2=Skill, 3=Wait
+    int selected_skill_idx_ = 0;  // Index into available skills
     bool show_move_range_ = false; // Show movement range highlight
+    bool show_skill_range_ = false; // Show skill range highlight
     // Cells reachable by selected unit (for movement range highlight)
     std::vector<std::pair<int32_t, int32_t>> movable_cells_;
     // Cells with enemies in melee attack range (for attack highlight)
     std::vector<std::pair<int32_t, int32_t>> attackable_cells_;
     // Cells with enemies in ranged attack range (for ranged highlight)
     std::vector<std::pair<int32_t, int32_t>> ranged_attackable_cells_;
+    // Cells in skill range (for skill highlight)
+    std::vector<std::pair<int32_t, int32_t>> skill_range_cells_;
+    // Show battle settlement dialog
+    bool show_settlement_ = false;
 };
 
 } // namespace tensyoki
