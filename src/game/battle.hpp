@@ -1,0 +1,134 @@
+/**
+ * battle.hpp - Tactical battle system for Phase 4
+ *
+ * Turn-based tactical combat on a grid map with units, terrain, and combat
+ * resolution.
+ */
+
+#pragma once
+
+#include "game_context.hpp"
+#include "game_state.hpp"
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace tensyoki {
+
+/// Terrain type affects movement cost and defense bonus
+enum class TerrainType {
+    Plain,    // Movement cost 1, defense bonus 0
+    Forest,   // Movement cost 2, defense bonus +1
+    Mountain, // Movement cost 3, defense bonus +2
+    Water,    // Movement cost 4 (impassable for most), defense bonus -1
+    Castle,   // Movement cost 1, defense bonus +3 (defender only)
+};
+
+/// Combat unit (a squadron led by an officer)
+struct BattleUnit {
+    uint32_t id = 0;
+    uint32_t officer_id = 0;
+    std::string name;
+    bool is_player = true;
+
+    // Combat stats
+    int32_t hp = 100;
+    int32_t max_hp = 100;
+    int32_t attack = 20;
+    int32_t defense = 10;
+    int32_t move = 3;        // Movement range in tiles
+    int32_t move_left = 3;   // Movement remaining this turn
+    bool has_acted = false;  // Has attacked this turn
+
+    // Position on grid
+    int32_t grid_x = 0;
+    int32_t grid_y = 0;
+
+    bool is_dead() const { return hp <= 0; }
+};
+
+/// Single terrain cell on the battlefield
+struct TerrainCell {
+    TerrainType type = TerrainType::Plain;
+    uint32_t unit_id = 0;  // Unit occupying this cell, or 0 if empty
+};
+
+/// Battle result
+enum class BattleResult {
+    Ongoing,
+    PlayerVictory,
+    PlayerDefeat,
+    Draw,
+};
+
+/// Tactical battle state machine
+class BattleStateData {
+public:
+    BattleStateData();
+    ~BattleStateData() = default;
+
+    // Initialize a test battle
+    void init_battle();
+
+    // Get unit at grid position (or null)
+    BattleUnit* get_unit_at(int32_t x, int32_t y);
+    const BattleUnit* get_unit_at(int32_t x, int32_t y) const;
+
+    // Get terrain at grid position
+    TerrainCell& get_terrain(int32_t x, int32_t y);
+    const TerrainCell& get_terrain(int32_t x, int32_t y) const;
+
+    // Check if position is valid and empty
+    bool is_valid_position(int32_t x, int32_t y) const;
+    bool is_position_empty(int32_t x, int32_t y) const;
+
+    // Get movement cost for entering a cell
+    int32_t movement_cost(int32_t x, int32_t y) const;
+
+    // Get defense bonus for a unit at a position
+    int32_t defense_bonus(int32_t x, int32_t y) const;
+
+    // Execute an attack from attacker to defender
+    bool attack(BattleUnit& attacker, BattleUnit& defender);
+
+    // Check if position is within attack range (adjacent)
+    bool is_in_attack_range(int32_t ax, int32_t ay, int32_t tx, int32_t ty) const;
+
+    // Getters
+    int32_t grid_width() const { return grid_width_; }
+    int32_t grid_height() const { return grid_height_; }
+    BattleResult result() const { return result_; }
+    bool is_player_turn() const { return is_player_turn_; }
+    uint32_t selected_unit_id() const { return selected_unit_id_; }
+    void set_selected_unit_id(uint32_t id) { selected_unit_id_ = id; }
+
+    // Get all units (read-only)
+    const std::vector<BattleUnit>& units() const { return units_; }
+    // Get mutable units
+    std::vector<BattleUnit>& units() { return units_; }
+
+    // Turn management
+    void next_turn();
+    bool all_player_units_acted() const;
+    bool all_enemy_units_acted() const;
+
+private:
+    int32_t grid_width_ = 20;
+    int32_t grid_height_ = 15;
+    std::vector<TerrainCell> terrain_grid_;
+    std::vector<BattleUnit> units_;
+    BattleResult result_ = BattleResult::Ongoing;
+    bool is_player_turn_ = true;
+    uint32_t selected_unit_id_ = 0;
+    uint32_t next_unit_id_ = 1;
+
+    // Helper: index into terrain grid
+    int32_t idx(int32_t x, int32_t y) const { return y * grid_width_ + x; }
+
+    // Roll damage dice
+    int32_t roll_damage(int32_t attack, int32_t defense) const;
+};
+
+} // namespace tensyoki

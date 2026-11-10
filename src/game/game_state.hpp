@@ -27,6 +27,7 @@ enum class GameStateID {
     MapView,
     OfficerDetail,
     CastleDetail,
+    CastleCommand,
     Battle,
     Quit,
 };

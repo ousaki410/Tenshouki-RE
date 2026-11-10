@@ -18,6 +18,7 @@
 #include "resource/dat_parser.hpp"
 #include "resource/gt1g_texture_cache.hpp"
 #include "render/shader_compiler.hpp"
+#include "castle_command.hpp"
 #include <memory>
 
 namespace tensyoki {
@@ -39,6 +40,7 @@ public:
     GT1GTextureCache* tex_cache = nullptr;  // not owned, points to Application's cache
     GameDate date;
     GameClock clock;
+    CastleCommand castle_command;
 
     // State transition requests (set by states, processed by Application)
     enum class PendingState {
@@ -46,6 +48,7 @@ public:
         MainMenu,
         MapView,
         OfficerDetail,
+        CastleCommand,
         Battle,
     };
     PendingState pending_push = PendingState::None;

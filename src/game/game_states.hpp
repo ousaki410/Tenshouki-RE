@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "battle.hpp"
+#include "castle_command.hpp"
 #include "game_context.hpp"
 #include "game_state.hpp"
 #include "map_view.hpp"
@@ -39,6 +41,7 @@ private:
     MapView map_view_;
     bool init_done_ = false;
     int selected_officer_ = -1;  // Selected officer from garrison list
+    int selected_castle_ = -1;   // Selected castle index for commands
 };
 
 /// Officer detail state
@@ -55,6 +58,21 @@ private:
     int selected_officer_ = -1;
 };
 
+/// Castle command state: manage castle facilities, troops, officers
+class CastleCommandState : public GameState {
+public:
+    explicit CastleCommandState(GameContext& ctx);
+    void enter() override;
+    bool update(float dt) override;
+    void render() override;
+    GameStateID id() const override { return GameStateID::CastleCommand; }
+
+private:
+    GameContext& ctx_;
+    int selected_castle_ = -1;
+    int selected_command_ = 0;  // 0=View Info, 1=Recruit Troops, 2=Build Wall, 3=Build Barracks, 4=Back
+};
+
 /// Battle state: tactical combat layer
 class BattleState : public GameState {
 public:
@@ -66,7 +84,10 @@ public:
 
 private:
     GameContext& ctx_;
+    BattleStateData battle_data_;
     bool init_done_ = false;
+    int selected_unit_id_ = -1;   // Currently selected unit ID
+    bool show_move_range_ = false; // Show movement range highlight
 };
 
 } // namespace tensyoki
