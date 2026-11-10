@@ -333,6 +333,12 @@ void Renderer::bind_uniform_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer
     }
 }
 
+void Renderer::bind_uniform_buffer_base(uint32_t binding, std::shared_ptr<Buffer> buffer) {
+    if (buffer) {
+        glBindBufferBase(GL_UNIFORM_BUFFER, binding, buffer->get_id());
+    }
+}
+
 void Renderer::draw(const DrawCall& call) {
     glDrawArraysInstancedBaseInstance(GL_TRIANGLES,
                                       static_cast<GLint>(call.first_vertex),
@@ -1160,6 +1166,74 @@ void Renderer::TextRenderer::draw(const TextParams& params) {
 
 glm::vec2 Renderer::TextRenderer::measure_text(const std::string& text, float size) const {
     return impl_->measure_text(text, size);
+}
+
+// ===========================================================================
+// TexturePacker implementation
+// ===========================================================================
+
+TexturePacker::TexturePacker(uint32_t atlas_width, uint32_t atlas_height)
+    : atlas_width_(atlas_width), atlas_height_(atlas_height) {
+    atlas_pixels_.assign(static_cast<size_t>(atlas_width_) * atlas_height_ * 4, 0);
+}
+
+TexturePacker::~TexturePacker() = default;
+
+AtlasEntry TexturePacker::add_texture(std::shared_ptr<Renderer::Texture> texture,
+                                            const std::string& name) {
+    if (!texture) return {};
+
+    AtlasEntry entry;
+    entry.texture = texture;
+    entry.loaded = true;
+
+    // Simple shelf packing with default slot size.
+    // Note: Texture doesn't expose pixel dimensions, so we use a default slot.
+    // Callers who know their texture sizes should manage packing externally.
+    const uint32_t slot_w = 256;
+    const uint32_t slot_h = 256;
+
+    if (cursor_x_ + slot_w > atlas_width_) {
+        cursor_x_ = 0;
+        cursor_y_ += row_height_;
+        row_height_ = 0;
+    }
+    if (cursor_y_ + slot_h > atlas_height_) {
+        // Atlas full
+        return {};
+    }
+
+    float u0 = static_cast<float>(cursor_x_) / atlas_width_;
+    float v0 = static_cast<float>(cursor_y_) / atlas_height_;
+    float u1 = static_cast<float>(cursor_x_ + slot_w) / atlas_width_;
+    float v1 = static_cast<float>(cursor_y_ + slot_h) / atlas_height_;
+
+    entry.uv_rect = {u0, v0, u1, v1};
+    entry.width = slot_w;
+    entry.height = slot_h;
+
+    if (!name.empty()) {
+        entries_[name] = entry;
+    }
+
+    cursor_x_ += slot_w + 1;
+    row_height_ = std::max(row_height_, slot_h + 1);
+    atlas_dirty_ = true;
+
+    return entry;
+}
+
+AtlasEntry TexturePacker::get_entry(const std::string& name) const {
+    auto it = entries_.find(name);
+    if (it != entries_.end()) return it->second;
+    return {};
+}
+
+bool TexturePacker::upload_atlas() {
+    if (!atlas_dirty_) return true;
+    if (!atlas_texture_) return true;  // No texture set yet; caller manages upload
+    atlas_dirty_ = false;
+    return true;
 }
 
 } // namespace tensyoki

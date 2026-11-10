@@ -930,11 +930,49 @@ private:
             ImGui::Text("Status: %u", officer.status);
             ImGui::Text("Gender: %u", officer.gender);
             ImGui::Separator();
-            ImGui::TextDisabled("Name rendered by FreeType (see overlay)");
-            ImGui::EndGroup();
 
-            // Reserve space below for the TextRenderer name overlay
-            ImGui::Dummy(ImVec2(0, 40.0f));
+            // Parse officer attributes from the 47-byte attr record.
+            // Observed layout (sndata1.dat):
+            //   +0x00..0x11  attr[18]  various attributes
+            //   +0x12        u16 id
+            //   +0x14..0x15  u8  pad[2]
+            //   +0x16        u8 status
+            //   +0x17        u8 gender
+            //   +0x18..0x2E  attr2[23] more attributes
+            ImGui::Text("Attributes (attr bytes):");
+            ImGui::BeginChild("AttrBytes", ImVec2(260, 110), true);
+            const auto& attr = officer.attr;
+            for (size_t i = 0; i < attr.size(); ++i) {
+                uint8_t b = attr[i];
+                // Skip the id/status/gender fields we already show above
+                if (i == 18 || i == 19 || i == 22 || i == 23) continue;
+                ImGui::Text("  [%2u] = %3u (0x%02X)", i, b, b);
+                if ((i + 1) % 6 == 0) ImGui::Spacing();
+            }
+            ImGui::EndChild();
+
+            // Common KOEI attribute hypotheses (attr2 offsets, values 0-100 typical)
+            ImGui::Separator();
+            ImGui::Text("Possible attribute mapping (hypothesis):");
+            ImGui::BeginChild("AttrHypothesis", ImVec2(260, 80), true);
+            auto show_attr = [&](size_t offset, const char* name) {
+                if (offset < attr.size()) {
+                    uint8_t b = attr[offset];
+                    bool valid = (b != 0xFF && b != 0);
+                    ImGui::TextColored(valid ? ImVec4(0.8f, 0.9f, 1.0f, 1.0f)
+                                             : ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+                                       "%s [%2u]: %3u", name, offset, b);
+                }
+            };
+            // attr2 starts at index 24 in the 47-byte record
+            show_attr(24, "Loyalty?");
+            show_attr(25, "Command?");
+            show_attr(26, "Warfare?");
+            show_attr(27, "Wisdom?");
+            show_attr(28, "Politics?");
+            show_attr(29, "Charm?");
+            ImGui::EndChild();
+            ImGui::EndGroup();
         } else {
             ImGui::Text("Select an officer from Data Table Viewer");
         }

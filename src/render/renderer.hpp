@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <unordered_map>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -433,6 +434,9 @@ public:
     void set_uniform_vec4(GLint location, const glm::vec4& value);
     void set_uniform_mat4(GLint location, const glm::mat4& value);
 
+    /// Bind a uniform buffer to a binding point (glBindBufferBase)
+    void bind_uniform_buffer_base(uint32_t binding, std::shared_ptr<Buffer> buffer);
+
     // Draw
     void draw(const DrawCall& call);
     void draw_indexed(uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, int32_t vertex_offset = 0, uint32_t first_instance = 0);
@@ -471,6 +475,80 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+};
+
+/// Uniform Buffer Object helper: creates a GL_UNIFORM_BUFFER, uploads data,
+/// and binds to a binding point for shader uniform blocks.
+struct UniformBuffer {
+    std::shared_ptr<Renderer::Buffer> buffer;
+    uint32_t binding = 0;
+    size_t size = 0;
+
+    UniformBuffer() = default;
+    UniformBuffer(std::shared_ptr<Renderer::Buffer> b, uint32_t bind)
+        : buffer(std::move(b)), binding(bind), size(b ? b->get_size() : 0) {}
+
+    bool valid() const { return buffer != nullptr; }
+
+    void upload(const void* data, size_t size, size_t offset = 0) {
+        if (buffer) buffer->update(data, size, offset);
+    }
+
+    void bind() const {
+        if (buffer) {
+            glBindBufferRange(GL_UNIFORM_BUFFER, binding, buffer->get_id(),
+                              0, static_cast<GLsizeiptr>(buffer->get_size()));
+        }
+    }
+};
+
+/// AtlasEntry: describes one packed slot in a texture atlas.
+struct AtlasEntry {
+    std::shared_ptr<Renderer::Texture> texture;
+    glm::vec4 uv_rect = {0, 0, 1, 1};  // UV coords within the atlas
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool loaded = false;
+};
+
+/// TexturePacker: packs multiple small textures into one large texture atlas
+/// to reduce texture bind calls during rendering. Uses simple shelf packing.
+class TexturePacker {
+public:
+    TexturePacker(uint32_t atlas_width = 2048, uint32_t atlas_height = 2048);
+    ~TexturePacker();
+
+    TexturePacker(const TexturePacker&) = delete;
+    TexturePacker& operator=(const TexturePacker&) = delete;
+
+    /// Add a texture to the atlas. Returns the atlas entry with UV rect.
+    /// Returns empty entry if the texture doesn't fit.
+    AtlasEntry add_texture(std::shared_ptr<Renderer::Texture> texture,
+                           const std::string& name = "");
+
+    /// Get the atlas texture
+    std::shared_ptr<Renderer::Texture> get_atlas_texture() const { return atlas_texture_; }
+
+    /// Get atlas dimensions
+    uint32_t width() const { return atlas_width_; }
+    uint32_t height() const { return atlas_height_; }
+
+    /// Get entry by name
+    AtlasEntry get_entry(const std::string& name) const;
+
+private:
+    uint32_t atlas_width_;
+    uint32_t atlas_height_;
+    std::shared_ptr<Renderer::Texture> atlas_texture_;
+    std::vector<uint8_t> atlas_pixels_;  // RGBA8 working buffer
+    uint32_t cursor_x_ = 0;
+    uint32_t cursor_y_ = 0;
+    uint32_t row_height_ = 0;
+    bool atlas_dirty_ = false;
+
+    std::unordered_map<std::string, AtlasEntry> entries_;
+
+    bool upload_atlas();
 };
 
 } // namespace tensyoki
