@@ -154,6 +154,7 @@ target_sources(tensyoki PRIVATE
     src/game/game_states.cpp
     src/game/battle.cpp
     src/game/castle_command.cpp
+    src/game/save_system.cpp
 )
 
 target_include_directories(tensyoki PRIVATE

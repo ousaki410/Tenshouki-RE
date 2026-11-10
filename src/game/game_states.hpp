@@ -25,6 +25,10 @@ public:
 private:
     GameContext& ctx_;
     int selected_item_ = 0;  // 0=New Game, 1=Load, 2=Quit
+    bool show_load_menu_ = false;
+    int selected_save_slot_ = 1;
+
+    void render_load_menu();
 };
 
 /// Map view state: strategic layer
@@ -42,6 +46,7 @@ private:
     bool init_done_ = false;
     int selected_officer_ = -1;  // Selected officer from garrison list
     int selected_castle_ = -1;   // Selected castle index for commands
+    int last_month_ = -1;        // Track month for resource production
 };
 
 /// Officer detail state

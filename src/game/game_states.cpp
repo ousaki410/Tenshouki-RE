@@ -23,6 +23,8 @@ MainMenuState::MainMenuState(GameContext& ctx) : ctx_(ctx) {}
 void MainMenuState::enter() {
     LOG_INFO("MainMenuState: enter");
     selected_item_ = 0;
+    show_load_menu_ = false;
+    selected_save_slot_ = 1;
 }
 
 bool MainMenuState::update(float dt) {
@@ -31,6 +33,11 @@ bool MainMenuState::update(float dt) {
 }
 
 void MainMenuState::render() {
+    if (show_load_menu_) {
+        render_load_menu();
+        return;
+    }
+
     ImGui::SetNextWindowPos({400, 300}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({400, 300}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Tensyoki - Main Menu", nullptr,
@@ -52,6 +59,8 @@ void MainMenuState::render() {
             if (i == 0) {
                 ctx_.date = GameDate{1, 4, 1};
                 ctx_.pending_push = GameContext::PendingState::MapView;
+            } else if (i == 1) {
+                show_load_menu_ = true;
             } else if (i == 2) {
                 ctx_.request_pop = true;
             }
@@ -73,9 +82,64 @@ void MainMenuState::render() {
         if (selected_item_ == 0) {
             ctx_.date = GameDate{1, 4, 1};
             ctx_.pending_push = GameContext::PendingState::MapView;
+        } else if (selected_item_ == 1) {
+            show_load_menu_ = true;
         } else if (selected_item_ == 2) {
             ctx_.request_pop = true;
         }
+    }
+}
+
+void MainMenuState::render_load_menu() {
+    ImGui::SetNextWindowPos({400, 300}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({500, 400}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("Load Game", nullptr,
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoMove);
+
+    ImGui::Text("Load Game");
+    ImGui::Separator();
+
+    auto saves = ctx_.save_system.list_saves();
+    if (saves.empty()) {
+        ImGui::Text("No save files found.");
+    } else {
+        for (const auto& slot : saves) {
+            std::string label = fmt::format(
+                "Slot {}: {} - {}", slot.slot, slot.save_name, slot.date_string);
+            bool selected = (selected_save_slot_ == slot.slot);
+            if (ImGui::Selectable(label.c_str(), selected)) {
+                selected_save_slot_ = slot.slot;
+            }
+        }
+        ImGui::Separator();
+        if (ImGui::Button("Load Selected", {-1, 0})) {
+            GameSaveData save_data;
+            if (ctx_.save_system.load(selected_save_slot_, save_data)) {
+                // Load game state
+                ctx_.date = GameDate{save_data.date_year, save_data.date_month,
+                                     save_data.date_day};
+                ctx_.castle_command.set_castles_data(save_data.castles);
+                ctx_.pending_push = GameContext::PendingState::MapView;
+                show_load_menu_ = false;
+                LOG_INFO("MainMenuState: loaded save slot %d",
+                         selected_save_slot_);
+            } else {
+                LOG_WARN("MainMenuState: failed to load save slot %d",
+                         selected_save_slot_);
+            }
+        }
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button("Back", {-1, 0})) {
+        show_load_menu_ = false;
+    }
+
+    ImGui::End();
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        show_load_menu_ = false;
     }
 }
 
@@ -89,6 +153,7 @@ void MapViewState::enter() {
     LOG_INFO("MapViewState: enter");
     init_done_ = false;
     selected_officer_ = -1;
+    last_month_ = ctx_.date.month;
 }
 
 bool MapViewState::update(float dt) {
@@ -97,6 +162,16 @@ bool MapViewState::update(float dt) {
     // Sync castle data from castle_command (facilities, garrison, etc.)
     if (ctx_.sndata) {
         map_view_.update_castle_data(ctx_.castle_command);
+    }
+
+    // Process monthly resource production when month changes
+    if (ctx_.sndata && ctx_.date.month != last_month_) {
+        last_month_ = ctx_.date.month;
+        ctx_.castle_command.process_monthly_income();
+        ctx_.castle_command.process_auto_recruit();
+        ctx_.castle_command.process_region_control();
+        LOG_INFO("MapViewState: processed monthly income for month %d",
+                 ctx_.date.month);
     }
 
     // Process UI request flags from map_view_
@@ -217,6 +292,41 @@ void MapViewState::render() {
         }
     } else {
         ImGui::Text("Click on a castle to select");
+    }
+    ImGui::End();
+
+    // Save/Load panel
+    ImGui::SetNextWindowPos({(float)ctx_.renderer->get_width() - 200, 200}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({190, 120}, ImGuiCond_Always);
+    ImGui::Begin("Save/Load", nullptr,
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+                 ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Text("Save Game:");
+    static int save_slot = 1;
+    ImGui::InputInt("##save_slot", &save_slot, 1, 5);
+    if (save_slot < 1) save_slot = 1;
+    if (save_slot > 10) save_slot = 10;
+    if (ImGui::Button("Save", {-1, 0})) {
+        GameSaveData save_data;
+        save_data.save_name = "Save " + std::to_string(save_slot);
+        save_data.date_year = ctx_.date.year;
+        save_data.date_month = ctx_.date.month;
+        save_data.date_day = ctx_.date.day;
+        save_data.castles = ctx_.castle_command.castles();
+        save_data.player_castle_count = ctx_.castle_command.player_castle_count();
+        save_data.total_castles = static_cast<int32_t>(ctx_.castle_command.castles().size());
+        if (ctx_.save_system.save(save_slot, save_data)) {
+            LOG_INFO("MapViewState: saved game to slot %d", save_slot);
+        } else {
+            LOG_WARN("MapViewState: failed to save to slot %d", save_slot);
+        }
+    }
+    ImGui::Separator();
+    if (ImGui::Button("Load Game", {-1, 0})) {
+        // Switch to main menu to load
+        ctx_.pending_push = GameContext::PendingState::MainMenu;
+        // Set a flag to auto-open load menu
+        // For simplicity, user will need to select Load Game from menu
     }
     ImGui::End();
 }

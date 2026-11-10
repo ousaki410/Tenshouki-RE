@@ -57,6 +57,12 @@ struct CastleData {
     uint32_t lord_officer_id = 0;
     std::string lord_name;
     std::string lord_name_utf8;
+
+    // Region control
+    uint32_t region_id = 0;           // Which region this castle belongs to
+    bool is_player_owned = false;     // Player controls this castle
+    bool is_capital = false;          // Capital city (victory condition)
+    int32_t auto_defense_bonus = 0;   // Auto-defense troops from facilities
 };
 
 /// Command result
@@ -109,17 +115,47 @@ public:
     // Get recruitment cost per troop
     int32_t recruitment_cost_per_troop() const { return 5; }
 
+    // Resource production calculations
+    int32_t calculate_gold_income(const CastleData& castle) const;
+    int32_t calculate_food_production(const CastleData& castle) const;
+    int32_t calculate_food_consumption(const CastleData& castle) const;
+    int32_t calculate_auto_defense(const CastleData& castle) const;
+
     // Process monthly income/upkeep (called at month start)
     void process_monthly_income();
 
+    // Process auto-recruitment for all player-owned castles
+    void process_auto_recruit();
+
+    // Process region control bonuses (called at month start)
+    void process_region_control();
+
     // Get all castles
     const std::vector<CastleData>& castles() const { return castles_; }
+
+    // Get castles owned by player
+    std::vector<uint32_t> get_player_castles() const;
+
+    // Get count of castles owned by player
+    int32_t player_castle_count() const;
+
+    // Get castles owned by player in a specific region
+    std::vector<uint32_t> get_player_castles_in_region(uint32_t region_id) const;
+
+    // Get all castles in a region
+    std::vector<uint32_t> get_castles_in_region(uint32_t region_id) const;
+
+    // Check if player controls all castles in a region
+    bool controls_region(uint32_t region_id) const;
 
     // Get all available officers (not assigned as lord anywhere)
     std::vector<uint32_t> get_available_officers(uint32_t exclude_castle_id = 0) const;
 
     // Get officer name by ID from sndata (helper for UI)
     std::string get_officer_name(uint32_t officer_id) const;
+
+    // Set all castle data (used for save/load)
+    void set_castles_data(const std::vector<CastleData>& castles);
 
 private:
     std::vector<CastleData> castles_;

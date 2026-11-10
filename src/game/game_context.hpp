@@ -19,6 +19,7 @@
 #include "resource/gt1g_texture_cache.hpp"
 #include "render/shader_compiler.hpp"
 #include "castle_command.hpp"
+#include "save_system.hpp"
 #include <memory>
 
 namespace tensyoki {
@@ -60,6 +61,10 @@ public:
     
     // Target castle for battle (map-to-battle linkage)
     std::optional<uint32_t> battle_target_castle;
+
+    // Save system
+    SaveSystem save_system;
+    std::string save_dir = "./saves";
 };
 
 } // namespace tensyoki

@@ -190,21 +190,142 @@ int32_t CastleCommand::facility_cost(FacilityType type) const {
     return 0;
 }
 
+int32_t CastleCommand::calculate_gold_income(const CastleData& castle) const {
+    int32_t income = 100;  // Base income
+    if (castle.has_market) income += 200;
+    if (castle.level > 1) income += 50 * (castle.level - 1);  // Level bonus
+    return income;
+}
+
+int32_t CastleCommand::calculate_food_production(const CastleData& castle) const {
+    int32_t production = 50;  // Base food production
+    if (castle.has_storehouse) production += 50;
+    if (castle.level > 1) production += 25 * (castle.level - 1);
+    return production;
+}
+
+int32_t CastleCommand::calculate_food_consumption(const CastleData& castle) const {
+    int32_t consumption = castle.garrison / 10;
+    if (consumption == 0) consumption = 1;
+    return consumption;
+}
+
+int32_t CastleCommand::calculate_auto_defense(const CastleData& castle) const {
+    int32_t defense_troops = 0;
+    if (castle.has_wall) defense_troops += 30;
+    if (castle.has_barracks) defense_troops += 20;
+    defense_troops += castle.level * 10;
+    return defense_troops;
+}
+
 void CastleCommand::process_monthly_income() {
     for (auto& castle : castles_) {
-        // Gold income from market and base
-        int32_t income = 100;
-        if (castle.has_market) income += 200;
+        if (!castle.is_player_owned) continue;  // Only process player-owned castles
+
+        // Gold income
+        int32_t income = calculate_gold_income(castle);
         castle.gold += income;
 
-        // Food consumption by garrison
-        int32_t consumption = castle.garrison / 10;
-        if (consumption == 0) consumption = 1;
-        castle.food = std::max(0, castle.food - consumption);
+        // Food production and consumption
+        int32_t production = calculate_food_production(castle);
+        int32_t consumption = calculate_food_consumption(castle);
+        castle.food = std::max(0, castle.food + production - consumption);
 
-        LOG_DEBUG("CastleCommand: castle {} income {} gold, food {}",
-                  castle.index, income, castle.food);
+        LOG_DEBUG("CastleCommand: castle {} income {} gold, food prod {} cons {}",
+                  castle.index, income, production, consumption);
     }
+}
+
+void CastleCommand::process_auto_recruit() {
+    for (auto& castle : castles_) {
+        if (!castle.is_player_owned) continue;
+        if (castle.garrison >= castle.max_garrison) continue;
+        if (castle.gold < recruitment_cost_per_troop()) continue;
+
+        int32_t needed = castle.max_garrison - castle.garrison;
+        int32_t affordable = castle.gold / recruitment_cost_per_troop();
+        int32_t to_recruit = std::min(needed, affordable);
+        if (to_recruit <= 0) continue;
+
+        castle.gold -= to_recruit * recruitment_cost_per_troop();
+        castle.garrison += to_recruit;
+
+        LOG_DEBUG("CastleCommand: auto-recruited {} troops at castle {}",
+                  to_recruit, castle.index);
+    }
+}
+
+void CastleCommand::process_region_control() {
+    if (!sndata_) return;
+
+    // Collect all region IDs
+    std::set<uint32_t> region_ids;
+    for (const auto& c : castles_) {
+        region_ids.insert(c.region_id);
+    }
+
+    for (uint32_t region_id : region_ids) {
+        if (controls_region(region_id)) {
+            // Region control bonus: +100 gold and +50 food to all castles in region
+            for (auto& castle : castles_) {
+                if (castle.region_id == region_id && castle.is_player_owned) {
+                    castle.gold += 100;
+                    castle.food += 50;
+                    LOG_DEBUG("CastleCommand: region control bonus for castle {}",
+                              castle.index);
+                }
+            }
+        }
+    }
+}
+
+std::vector<uint32_t> CastleCommand::get_player_castles() const {
+    std::vector<uint32_t> result;
+    for (const auto& c : castles_) {
+        if (c.is_player_owned) result.push_back(c.index);
+    }
+    return result;
+}
+
+int32_t CastleCommand::player_castle_count() const {
+    int32_t count = 0;
+    for (const auto& c : castles_) {
+        if (c.is_player_owned) count++;
+    }
+    return count;
+}
+
+std::vector<uint32_t> CastleCommand::get_player_castles_in_region(
+    uint32_t region_id) const {
+    std::vector<uint32_t> result;
+    for (const auto& c : castles_) {
+        if (c.is_player_owned && c.region_id == region_id) {
+            result.push_back(c.index);
+        }
+    }
+    return result;
+}
+
+std::vector<uint32_t> CastleCommand::get_castles_in_region(
+    uint32_t region_id) const {
+    std::vector<uint32_t> result;
+    for (const auto& c : castles_) {
+        if (c.region_id == region_id) result.push_back(c.index);
+    }
+    return result;
+}
+
+bool CastleCommand::controls_region(uint32_t region_id) const {
+    auto region_castles = get_castles_in_region(region_id);
+    if (region_castles.empty()) return false;
+    for (uint32_t idx : region_castles) {
+        if (!get_castle(idx)->is_player_owned) return false;
+    }
+    return true;
+}
+
+void CastleCommand::set_castles_data(const std::vector<CastleData>& castles) {
+    castles_ = castles;
 }
 
 CommandResult CastleCommand::upgrade_castle(uint32_t castle_index) {

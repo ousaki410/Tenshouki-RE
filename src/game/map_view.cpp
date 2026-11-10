@@ -621,6 +621,11 @@ void MapView::render_ui(Renderer& renderer) {
             ImGui::Text("Level: %d", cp->level);
             ImGui::Text("Position: (%.0f, %.0f)", cp->x, cp->y);
             ImGui::Separator();
+            ImGui::Text("Owner: %s",
+                cp->is_player_owned ? "Player" :
+                (cp->owner_id != 0 ? "Enemy" : "Neutral"));
+            ImGui::Text("Capital: %s", cp->is_capital ? "Yes" : "No");
+            ImGui::Separator();
             ImGui::Text("Garrison: %d/%d", cp->garrison, cp->max_garrison);
             ImGui::Text("Gold: %d", cp->gold);
             ImGui::Text("Food: %d", cp->food);
@@ -740,6 +745,35 @@ void MapView::render_ui(Renderer& renderer) {
             active_region_ = static_cast<uint32_t>(region_sel);
         }
     }
+
+    // Region control summary
+    ImGui::Separator();
+    ImGui::Text("Region Control:");
+    int32_t player_castles = 0, total_castles = 0;
+    for (const auto& c : castles_) {
+        if (!is_castle_visible(c.index)) continue;
+        total_castles++;
+        if (c.is_player_owned) player_castles++;
+    }
+    ImGui::Text("Player: %d/%d castles", player_castles, total_castles);
+    // Count controlled regions
+    std::set<uint32_t> region_ids;
+    for (const auto& c : castles_) {
+        if (!is_castle_visible(c.index)) continue;
+        region_ids.insert(c.region_id);
+    }
+    int32_t controlled_regions = 0;
+    for (uint32_t rid : region_ids) {
+        bool all_owned = true;
+        for (const auto& c : castles_) {
+            if (c.region_id == rid && !c.is_player_owned) {
+                all_owned = false;
+                break;
+            }
+        }
+        if (all_owned) controlled_regions++;
+    }
+    ImGui::Text("Regions controlled: %d/%zu", controlled_regions, region_ids.size());
 
     ImGui::End();
 }
