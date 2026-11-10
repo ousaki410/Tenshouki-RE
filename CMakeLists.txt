@@ -148,12 +148,17 @@ target_sources(tensyoki PRIVATE
     src/resource/gt1g_texture_cache.cpp
     src/ui/imgui_backend.cpp
     src/ui/texture_atlas_viewer.hpp
+    src/game/game_state.cpp
+    src/game/game_date.cpp
+    src/game/map_view.cpp
+    src/game/game_states.cpp
 )
 
 target_include_directories(tensyoki PRIVATE
     src
     src/core
     src/ui
+    src/game
     ${glad_SOURCE_DIR}/include
     $<TARGET_PROPERTY:glad,INTERFACE_INCLUDE_DIRECTORIES>
     ${FREETYPE_INCLUDE_DIRS}

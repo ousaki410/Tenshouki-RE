@@ -1,0 +1,43 @@
+/**
+ * game_context.hpp - Shared game resources for Phase 4
+ *
+ * Holds all resources that game states need:
+ *   - Renderer (OpenGL)
+ *   - TextRenderer (FreeType)
+ *   - SndataArchive (officers/castles)
+ *   - GT1GTextureCache (portrait textures)
+ *   - ShaderCompiler (shader compilation)
+ *   - GameDate (in-game date)
+ */
+
+#pragma once
+
+#include "game_date.hpp"
+#include "render/renderer.hpp"
+#include "resource/bin_parser.hpp"
+#include "resource/dat_parser.hpp"
+#include "resource/gt1g_texture_cache.hpp"
+#include "render/shader_compiler.hpp"
+#include <memory>
+
+namespace tensyoki {
+
+class GameContext {
+public:
+    GameContext() = default;
+    ~GameContext() = default;
+
+    GameContext(const GameContext&) = delete;
+    GameContext& operator=(const GameContext&) = delete;
+
+    // Resources (set by Application during init)
+    Renderer* renderer = nullptr;
+    std::unique_ptr<Renderer::TextRenderer> text_renderer;
+    std::unique_ptr<ShaderCompiler> shader_compiler;
+    std::unique_ptr<BinArchive> grp_archive;
+    std::unique_ptr<SndataArchive> sndata;
+    GT1GTextureCache* tex_cache = nullptr;  // not owned, points to Application's cache
+    GameDate date;
+};
+
+} // namespace tensyoki

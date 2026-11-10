@@ -15,6 +15,12 @@
 #include "ui/texture_atlas_viewer.hpp"
 #include "platform/platform.hpp"
 
+#include "game/game_context.hpp"
+#include "game/game_state.hpp"
+#include "game/game_states.hpp"
+#include "game/game_date.hpp"
+#include "game/map_view.hpp"
+
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <fmt/format.h>
@@ -228,6 +234,20 @@ private:
         }
 
         LOG_INFO("Initialization complete");
+
+        // Initialize Phase 4 game state system
+        game_ctx_.renderer = renderer_.get();
+        game_ctx_.text_renderer = std::move(text_renderer_);
+        game_ctx_.shader_compiler = std::move(shader_compiler_);
+        game_ctx_.grp_archive = std::move(grp_archive_);
+        game_ctx_.sndata = std::make_unique<SndataArchive>(std::move(sndata_loaded_));
+        game_ctx_.tex_cache = &texture_cache_;  // not owned
+
+        // Push main menu state
+        game_state_mgr_.push(std::make_unique<MainMenuState>(game_ctx_));
+
+        game_initialized_ = true;
+        LOG_INFO("Phase 4 game system initialized");
         return true;
     }
     
@@ -425,8 +445,26 @@ private:
             // Clear screen
             renderer_->clear(0.1f, 0.1f, 0.15f, 1.0f);
             
-            // Render UI
+            // Update game state system
+            if (game_initialized_) {
+                static float accumulator = 0.0f;
+                float dt = 1.0f / 60.0f;
+                accumulator += dt;
+                while (accumulator >= dt) {
+                    if (!game_state_mgr_.update(dt)) {
+                        running = false;
+                    }
+                    accumulator -= dt;
+                }
+            }
+            
+            // Render UI (ImGui)
             render_ui();
+            
+            // Render game states (draw on top of ImGui)
+            if (game_initialized_) {
+                game_state_mgr_.render();
+            }
             
             // End the frame
             renderer_->end_frame();
@@ -480,6 +518,17 @@ private:
                 ImGui::MenuItem("Shader Viewer", nullptr, &show_shader_viewer_);
                 ImGui::MenuItem("Data Table Viewer", nullptr, &show_dat_viewer_);
                 ImGui::MenuItem("Officer Card", nullptr, &show_officer_card_);
+                if (game_initialized_) {
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Start Game")) {
+                        game_state_mgr_.clear();
+                        game_state_mgr_.push(std::make_unique<MapViewState>(game_ctx_));
+                    }
+                    if (ImGui::MenuItem("Main Menu")) {
+                        game_state_mgr_.clear();
+                        game_state_mgr_.push(std::make_unique<MainMenuState>(game_ctx_));
+                    }
+                }
                 ImGui::EndMenu();
             }
             
@@ -1322,6 +1371,11 @@ void main() {
 
     // Text rendering
     std::unique_ptr<Renderer::TextRenderer> text_renderer_;
+
+    // Phase 4: Game state system
+    GameContext game_ctx_;
+    GameStateManager game_state_mgr_;
+    bool game_initialized_ = false;
 
     // Shader compiler and parsed shader infos
     std::unique_ptr<ShaderCompiler> shader_compiler_;
