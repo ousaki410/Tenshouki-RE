@@ -91,8 +91,14 @@ public:
     // Build a facility at a castle
     CommandResult build_facility(uint32_t castle_index, FacilityType type);
 
+    // Upgrade castle level
+    CommandResult upgrade_castle(uint32_t castle_index);
+
     // Get construction cost for a facility
     int32_t facility_cost(FacilityType type) const;
+
+    // Get upgrade cost for castle
+    int32_t castle_upgrade_cost(uint32_t castle_index) const;
 
     // Get recruitment cost per troop
     int32_t recruitment_cost_per_troop() const { return 5; }
@@ -102,6 +108,9 @@ public:
 
     // Get all castles
     const std::vector<CastleData>& castles() const { return castles_; }
+
+    // Get all available officers (not assigned as lord)
+    std::vector<uint32_t> get_available_officers(uint32_t exclude_castle_id = 0) const;
 
 private:
     std::vector<CastleData> castles_;

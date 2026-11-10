@@ -114,6 +114,18 @@ public:
     bool all_player_units_acted() const;
     bool all_enemy_units_acted() const;
 
+    // AI: Execute AI turn for all enemy units
+    void ai_turn();
+
+    // Pathfinding: A* from start to goal, returns path (excluding start)
+    std::vector<std::pair<int32_t, int32_t>> find_path(int32_t sx, int32_t sy,
+                                                       int32_t gx, int32_t gy,
+                                                       int32_t max_cost) const;
+
+    // Check if a unit can reach a target position within remaining movement
+    bool can_reach(int32_t sx, int32_t sy, int32_t tx, int32_t ty,
+                   int32_t move_left) const;
+
 private:
     int32_t grid_width_ = 20;
     int32_t grid_height_ = 15;
@@ -129,6 +141,9 @@ private:
 
     // Roll damage dice
     int32_t roll_damage(int32_t attack, int32_t defense) const;
+
+    // AI helper: get mutable unit by ID
+    BattleUnit* get_unit_by_id(uint32_t id);
 };
 
 } // namespace tensyoki

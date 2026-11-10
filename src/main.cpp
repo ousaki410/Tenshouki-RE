@@ -491,6 +491,10 @@ private:
                             game_state_mgr_.push(
                                 std::make_unique<BattleState>(game_ctx_));
                             break;
+                        case GameContext::PendingState::CastleCommand:
+                            game_state_mgr_.push(
+                                std::make_unique<CastleCommandState>(game_ctx_));
+                            break;
                         case GameContext::PendingState::None:
                             break;
                     }

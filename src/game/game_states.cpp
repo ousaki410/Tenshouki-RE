@@ -189,6 +189,7 @@ void MapViewState::render() {
 
     auto sel = map_view_.selected_castle();
     if (sel) {
+        ctx_.selected_castle_id = *sel;
         const CastlePos* cp = nullptr;
         for (const auto& c : map_view_.castles()) {
             if (c.index == *sel) { cp = &c; break; }
@@ -221,6 +222,7 @@ void MapViewState::render() {
 
             ImGui::Separator();
             if (ImGui::Button("Castle Commands")) {
+                ctx_.selected_castle_id = *sel;
                 ctx_.pending_push = GameContext::PendingState::CastleCommand;
             }
             ImGui::SameLine();
@@ -231,33 +233,6 @@ void MapViewState::render() {
     } else {
         ImGui::Text("Click on a castle to select");
     }
-
-    ImGui::Separator();
-    ImGui::Text("Date/Time Controls:");
-    ImGui::Text("Pause: %s", ctx_.clock.paused ? "ON" : "OFF");
-    ImGui::SameLine();
-    if (ImGui::Button(ctx_.clock.paused ? "Resume" : "Pause")) {
-        ctx_.clock.paused = !ctx_.clock.paused;
-    }
-    ImGui::SameLine();
-    ImGui::Text("Speed: %.1fx", ctx_.clock.speed);
-    if (ImGui::Button("-")) {
-        ctx_.clock.speed = std::max(0.5f, ctx_.clock.speed - 0.5f);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("+")) {
-        ctx_.clock.speed = std::min(8.0f, ctx_.clock.speed + 0.5f);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("1x")) {
-        ctx_.clock.speed = 1.0f;
-    }
-    ImGui::Separator();
-    if (ImGui::Button("Return to Menu")) {
-        ctx_.request_pop = true;
-    }
-
-    ImGui::End();
 }
 
 // ===========================================================================

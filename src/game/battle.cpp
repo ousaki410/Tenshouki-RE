@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <queue>
+#include <set>
 
 namespace tensyoki {
 
@@ -247,6 +249,11 @@ void BattleStateData::next_turn() {
     } else if (!any_enemy_alive) {
         result_ = BattleResult::PlayerVictory;
     }
+
+    // If it's enemy turn, execute AI automatically
+    if (!is_player_turn_ && result_ == BattleResult::Ongoing) {
+        ai_turn();
+    }
 }
 
 bool BattleStateData::all_player_units_acted() const {
@@ -263,6 +270,144 @@ bool BattleStateData::all_enemy_units_acted() const {
         if (!u.has_acted) return false;
     }
     return true;
+}
+
+void BattleStateData::ai_turn() {
+    // AI: For each enemy unit, move toward nearest player unit and attack if possible
+    for (auto& unit : units_) {
+        if (unit.is_dead() || unit.is_player || unit.has_acted) continue;
+
+        // Find nearest player unit
+        BattleUnit* target = nullptr;
+        int32_t best_dist = 99999;
+        for (auto& u : units_) {
+            if (u.is_dead() || !u.is_player) continue;
+            int32_t dist = std::abs(unit.grid_x - u.grid_x) +
+                           std::abs(unit.grid_y - u.grid_y);
+            if (dist < best_dist) {
+                best_dist = dist;
+                target = &u;
+            }
+        }
+
+        if (!target) continue;
+
+        // If in attack range, attack
+        if (is_in_attack_range(unit.grid_x, unit.grid_y,
+                               target->grid_x, target->grid_y)) {
+            attack(unit, *target);
+            continue;
+        }
+
+        // Otherwise, move toward target using A*
+        auto path = find_path(unit.grid_x, unit.grid_y,
+                              target->grid_x, target->grid_y,
+                              unit.move_left);
+        if (!path.empty()) {
+            // Move to first step in path
+            auto [nx, ny] = path[0];
+            // Update terrain grid
+            auto& old_cell = get_terrain(unit.grid_x, unit.grid_y);
+            old_cell.unit_id = 0;
+            unit.grid_x = nx;
+            unit.grid_y = ny;
+            auto& new_cell = get_terrain(unit.grid_x, unit.grid_y);
+            new_cell.unit_id = unit.id;
+
+            // Deduct movement cost
+            int32_t cost = movement_cost(nx, ny);
+            unit.move_left -= cost;
+
+            // Check if now in attack range
+            if (is_in_attack_range(unit.grid_x, unit.grid_y,
+                                   target->grid_x, target->grid_y)) {
+                attack(unit, *target);
+            }
+        }
+    }
+}
+
+std::vector<std::pair<int32_t, int32_t>> BattleStateData::find_path(
+    int32_t sx, int32_t sy, int32_t gx, int32_t gy,
+    int32_t max_cost) const {
+    // Simple A* pathfinding
+    struct Node {
+        int32_t x, y;
+        int32_t g, h, f;
+    };
+
+    auto heuristic = [&](int32_t x, int32_t y) {
+        return std::abs(x - gx) + std::abs(y - gy);
+    };
+
+    std::vector<std::vector<int32_t>> g_score(
+        grid_height_, std::vector<int32_t>(grid_width_, 99999));
+    std::vector<std::vector<bool>> closed(grid_height_,
+                                          std::vector<bool>(grid_width_, false));
+    // Track parent for path reconstruction
+    std::vector<std::vector<std::pair<int32_t, int32_t>>> parent(
+        grid_height_, std::vector<std::pair<int32_t, int32_t>>(grid_width_,
+                                                               {-1, -1}));
+
+    auto cmp = [](const Node& a, const Node& b) { return a.f > b.f; };
+    std::priority_queue<Node, std::vector<Node>, decltype(cmp)> open(cmp);
+
+    g_score[sy][sx] = 0;
+    parent[sy][sx] = {sx, sy};
+    open.push({sx, sy, 0, heuristic(sx, sy), heuristic(sx, sy)});
+
+    while (!open.empty()) {
+        auto curr = open.top();
+        open.pop();
+
+        if (closed[curr.y][curr.x]) continue;
+        closed[curr.y][curr.x] = true;
+
+        if (curr.x == gx && curr.y == gy) {
+            // Reconstruct path using parent pointers
+            std::vector<std::pair<int32_t, int32_t>> path;
+            int32_t cx = curr.x, cy = curr.y;
+            while (cx != sx || cy != sy) {
+                path.push_back({cx, cy});
+                auto [px, py] = parent[cy][cx];
+                cx = px;
+                cy = py;
+            }
+            std::reverse(path.begin(), path.end());
+            // path[0] is first step from start, exclude start itself
+            return path;
+        }
+
+        // Explore neighbors
+        const int dx[4] = {0, 1, 0, -1};
+        const int dy[4] = {-1, 0, 1, 0};
+        for (int i = 0; i < 4; ++i) {
+            int32_t nx = curr.x + dx[i];
+            int32_t ny = curr.y + dy[i];
+            if (!is_valid_position(nx, ny)) continue;
+            if (!is_position_empty(nx, ny)) continue;  // Can't move into occupied cell
+            int32_t cost = movement_cost(nx, ny);
+            if (curr.g + cost > max_cost) continue;
+
+            int32_t new_g = curr.g + cost;
+            if (new_g < g_score[ny][nx]) {
+                g_score[ny][nx] = new_g;
+                parent[ny][nx] = {curr.x, curr.y};
+                int32_t f = new_g + heuristic(nx, ny);
+                open.push({nx, ny, new_g, heuristic(nx, ny), f});
+            }
+        }
+    }
+
+    return {};  // No path found
+}
+
+// Helper to get mutable unit reference by ID
+BattleUnit* BattleStateData::get_unit_by_id(uint32_t id) {
+    for (auto& u : units_) {
+        if (u.id == id) return &u;
+    }
+    return nullptr;
 }
 
 } // namespace tensyoki

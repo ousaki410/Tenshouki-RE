@@ -168,4 +168,45 @@ void CastleCommand::process_monthly_income() {
     }
 }
 
+CommandResult CastleCommand::upgrade_castle(uint32_t castle_index) {
+    auto* castle = get_castle(castle_index);
+    if (!castle) return CommandResult::InvalidTarget;
+
+    int32_t cost = castle_upgrade_cost(castle_index);
+    if (castle->gold < cost) return CommandResult::InsufficientGold;
+
+    castle->gold -= cost;
+    castle->level += 1;
+    castle->max_defense += 20;
+    castle->defense = castle->max_defense;  // Restore to full
+    castle->max_garrison += 30;
+
+    LOG_INFO("CastleCommand: upgraded castle {} to level {} (cost: {} gold)",
+             castle_index, castle->level, cost);
+    return CommandResult::Success;
+}
+
+int32_t CastleCommand::castle_upgrade_cost(uint32_t castle_index) const {
+    auto* castle = get_castle(castle_index);
+    if (!castle) return 0;
+    return 500 * castle->level;  // Cost scales with level
+}
+
+std::vector<uint32_t> CastleCommand::get_available_officers(
+    uint32_t exclude_castle_id) const {
+    std::vector<uint32_t> available;
+    // In a full implementation, this would query the officer database
+    // and exclude officers already assigned as lords
+    for (const auto& c : castles_) {
+        if (c.index == exclude_castle_id) continue;
+        if (c.lord_officer_id != 0) {
+            // Officer already assigned, add as available if not lord here
+            // (simplified: just track assigned officer IDs)
+        }
+    }
+    // Return empty for now - in a full implementation, this would query
+    // the officer database for unassigned officers
+    return available;
+}
+
 } // namespace tensyoki

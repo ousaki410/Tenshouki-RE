@@ -54,6 +54,9 @@ public:
     PendingState pending_push = PendingState::None;
     bool request_pop = false;
     bool request_clear = false;
+    
+    // Selected castle for commands
+    uint32_t selected_castle_id = 0;
 };
 
 } // namespace tensyoki
