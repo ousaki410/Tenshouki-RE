@@ -423,6 +423,8 @@ public:
     Backend get_backend() const;
     void* get_device() const;  // VkDevice, or none (OpenGL)
     std::string get_backend_name() const;
+    int get_width() const;
+    int get_height() const;
 
     // Debug
     void push_debug_group(const std::string& name);

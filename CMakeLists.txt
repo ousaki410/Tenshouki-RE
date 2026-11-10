@@ -72,6 +72,9 @@ FetchContent_MakeAvailable(imgui)
 # Find system packages
 find_package(OpenGL REQUIRED)
 
+# FreeType 2 (for font rendering)
+find_package(Freetype REQUIRED)
+
 # Optional: Vulkan (for future use)
 find_package(Vulkan QUIET)
 
@@ -153,6 +156,7 @@ target_include_directories(tensyoki PRIVATE
     src/ui
     ${glad_SOURCE_DIR}/include
     $<TARGET_PROPERTY:glad,INTERFACE_INCLUDE_DIRECTORIES>
+    ${FREETYPE_INCLUDE_DIRS}
 )
 
 target_link_libraries(tensyoki PRIVATE
@@ -163,6 +167,7 @@ target_link_libraries(tensyoki PRIVATE
     dxc::dxcompiler
     glm::glm
     OpenGL::GL
+    Freetype::Freetype
     imgui_lib
     glad
 )

@@ -7,9 +7,13 @@
 #include <SDL3/SDL.h>
 #include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <cmath>
 #include <stdexcept>
 #include <utility>
+#include <unordered_map>
+#include <cstring>
 
 namespace tensyoki {
 
@@ -307,6 +311,9 @@ std::string Renderer::get_backend_name() const {
     }
 }
 
+int Renderer::get_width() const { return impl_->width_; }
+int Renderer::get_height() const { return impl_->height_; }
+
 void Renderer::push_debug_group(const std::string& name) {
     glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, static_cast<GLsizei>(name.size()), name.c_str());
 }
@@ -528,10 +535,366 @@ void Renderer::SpriteRenderer::set_default_texture(std::shared_ptr<Texture> tex)
     impl_->default_texture_ = std::move(tex);
 }
 
-// === TextRenderer Implementation (Minimal) ===
+// === TextRenderer Implementation (FreeType 2 + SpriteRenderer) ===
+
+namespace {
+
+constexpr int kAtlasWidth = 1024;
+constexpr int kAtlasHeight = 1024;
+constexpr uint32_t kFirstChar = 0x20;  // space
+constexpr uint32_t kLastChar = 0x7E;   // tilde
+
+} // namespace
+
+struct GlyphInfo {
+    uint32_t codepoint = 0;
+    glm::vec4 uv_rect = {0, 0, 1, 1};  // UV in atlas
+    glm::vec2 size = {0, 0};           // pixel size
+    glm::vec2 bearing = {0, 0};        // offset from baseline
+    int32_t advance = 0;               // advance in 1/64 pixels
+};
+
 struct Renderer::TextRenderer::Impl {
     Renderer& renderer_;
-    explicit Impl(Renderer& r) : renderer_(r) {}
+    FT_Library ft_library_ = nullptr;
+    FT_Face ft_face_ = nullptr;
+    GLuint atlas_texture_id_ = 0;
+    int atlas_width_ = kAtlasWidth;
+    int atlas_height_ = kAtlasHeight;
+    int atlas_cursor_x_ = 0;
+    int atlas_cursor_y_ = 0;
+    int atlas_row_height_ = 0;
+    float font_size_ = 24.0f;
+    std::vector<uint8_t> atlas_pixels_;  // alpha channel only, expanded to RGBA on upload
+    std::unordered_map<uint32_t, GlyphInfo> glyphs_;
+    std::unique_ptr<Renderer::SpriteRenderer> sprite_renderer_;
+    std::shared_ptr<Renderer::Texture> atlas_texture_obj_;
+    bool atlas_dirty_ = false;
+
+    explicit Impl(Renderer& r) : renderer_(r) {
+        if (FT_Init_FreeType(&ft_library_) != 0) {
+            LOG_ERROR("FreeType: failed to initialize library");
+        }
+        sprite_renderer_ = std::make_unique<Renderer::SpriteRenderer>(renderer_);
+        // Allocate alpha-only atlas buffer
+        atlas_pixels_.assign(static_cast<size_t>(atlas_width_) * atlas_height_, 0);
+    }
+
+    ~Impl() {
+        if (atlas_texture_id_) glDeleteTextures(1, &atlas_texture_id_);
+        if (ft_face_) FT_Done_Face(ft_face_);
+        if (ft_library_) FT_Done_FreeType(ft_library_);
+    }
+
+    bool load_font(const std::filesystem::path& path, float size) {
+        if (!ft_library_) return false;
+        if (ft_face_) FT_Done_Face(ft_face_);
+        ft_face_ = nullptr;
+
+        if (FT_New_Face(ft_library_, path.string().c_str(), 0, &ft_face_) != 0) {
+            LOG_ERROR("FreeType: failed to load font: {}", path.string());
+            return false;
+        }
+
+        FT_Set_Pixel_Sizes(ft_face_, 0, static_cast<FT_UInt>(size));
+        font_size_ = size;
+
+        // Reset atlas
+        atlas_cursor_x_ = 0;
+        atlas_cursor_y_ = 0;
+        atlas_row_height_ = 0;
+        std::fill(atlas_pixels_.begin(), atlas_pixels_.end(), 0);
+        glyphs_.clear();
+        atlas_dirty_ = true;
+
+        // Pre-render ASCII characters
+        for (uint32_t cp = kFirstChar; cp <= kLastChar; ++cp) {
+            if (FT_Load_Char(ft_face_, cp, FT_LOAD_RENDER) != 0) continue;
+            FT_Bitmap& bm = ft_face_->glyph->bitmap;
+            if (bm.width == 0 || bm.rows == 0) {
+                // Empty glyph (e.g. space) - record advance only
+                GlyphInfo info;
+                info.codepoint = cp;
+                info.size = {0, 0};
+                info.bearing = {0, 0};
+                info.advance = ft_face_->glyph->advance.x;
+                info.uv_rect = {0, 0, 0, 0};
+                glyphs_[cp] = info;
+                continue;
+            }
+
+            glm::vec4 uv;
+            if (!pack_glyph(bm, bm.width, bm.rows, uv)) {
+                LOG_WARN("FreeType: atlas full, skipping codepoint U+{:04X}", cp);
+                continue;
+            }
+
+            GlyphInfo info;
+            info.codepoint = cp;
+            info.size = {static_cast<float>(bm.width), static_cast<float>(bm.rows)};
+            info.bearing = {static_cast<float>(ft_face_->glyph->bitmap_left),
+                            static_cast<float>(ft_face_->glyph->bitmap_top)};
+            info.advance = ft_face_->glyph->advance.x;
+            info.uv_rect = uv;
+            glyphs_[cp] = info;
+        }
+
+        upload_atlas();
+        return true;
+    }
+
+    bool pack_glyph(const FT_Bitmap& bm, int width, int rows, glm::vec4& uv) {
+        // Simple row-based packing
+        if (atlas_cursor_x_ + width > atlas_width_) {
+            atlas_cursor_x_ = 0;
+            atlas_cursor_y_ += atlas_row_height_;
+            atlas_row_height_ = 0;
+        }
+        if (atlas_cursor_y_ + rows > atlas_height_) {
+            return false;  // atlas full
+        }
+
+        // Copy alpha pixels into atlas (alpha channel only)
+        for (int row = 0; row < rows; ++row) {
+            size_t dst = static_cast<size_t>(atlas_cursor_y_ + row) * atlas_width_ + atlas_cursor_x_;
+            const uint8_t* src = bm.buffer + static_cast<size_t>(row) * bm.pitch;
+            for (int col = 0; col < width; ++col) {
+                atlas_pixels_[dst + col] = src[col];
+            }
+        }
+
+        float u0 = static_cast<float>(atlas_cursor_x_) / atlas_width_;
+        float v0 = static_cast<float>(atlas_cursor_y_) / atlas_height_;
+        float u1 = static_cast<float>(atlas_cursor_x_ + width) / atlas_width_;
+        float v1 = static_cast<float>(atlas_cursor_y_ + rows) / atlas_height_;
+        uv = {u0, v0, u1, v1};
+
+        atlas_cursor_x_ += width + 1;  // 1px padding
+        atlas_row_height_ = std::max(atlas_row_height_, rows + 1);
+        atlas_dirty_ = true;
+        return true;
+    }
+
+    void upload_atlas() {
+        if (!atlas_dirty_) return;
+        if (!atlas_texture_obj_) {
+            Renderer::TextureCreateInfo info{};
+            info.width = atlas_width_;
+            info.height = atlas_height_;
+            info.format = Renderer::TextureCreateInfo::Format::R8G8B8A8_UNORM;
+            info.mip_levels = 1;
+            atlas_texture_obj_ = renderer_.create_texture(info);
+        }
+
+        // Expand alpha-only buffer to RGBA8 (white text with alpha from atlas)
+        std::vector<uint8_t> rgba;
+        rgba.reserve(atlas_pixels_.size() * 4);
+        for (uint8_t a : atlas_pixels_) {
+            rgba.push_back(255);  // R
+            rgba.push_back(255);  // G
+            rgba.push_back(255);  // B
+            rgba.push_back(a);    // A
+        }
+
+        Renderer::TextureCreateInfo info{};
+        info.width = atlas_width_;
+        info.height = atlas_height_;
+        info.format = Renderer::TextureCreateInfo::Format::R8G8B8A8_UNORM;
+        info.initial_data = rgba.data();
+        info.data_size = rgba.size();
+        info.mip_levels = 1;
+
+        if (atlas_texture_obj_) {
+            // Re-create texture with updated data
+            atlas_texture_obj_ = renderer_.create_texture(info);
+        } else {
+            atlas_texture_obj_ = renderer_.create_texture(info);
+        }
+        atlas_dirty_ = false;
+    }
+
+    GlyphInfo* get_glyph(uint32_t codepoint) {
+        auto it = glyphs_.find(codepoint);
+        if (it != glyphs_.end()) return &it->second;
+
+        // Try to render on demand
+        if (ft_face_ && FT_Load_Char(ft_face_, codepoint, FT_LOAD_RENDER) == 0) {
+            FT_Bitmap& bm = ft_face_->glyph->bitmap;
+            if (bm.width > 0 && bm.rows > 0) {
+                glm::vec4 uv;
+                if (pack_glyph(bm, bm.width, bm.rows, uv)) {
+                    GlyphInfo info;
+                    info.codepoint = codepoint;
+                    info.size = {static_cast<float>(bm.width), static_cast<float>(bm.rows)};
+                    info.bearing = {static_cast<float>(ft_face_->glyph->bitmap_left),
+                                    static_cast<float>(ft_face_->glyph->bitmap_top)};
+                    info.advance = ft_face_->glyph->advance.x;
+                    info.uv_rect = uv;
+                    glyphs_[codepoint] = info;
+                    upload_atlas();
+                    return &glyphs_.at(codepoint);
+                }
+            } else {
+                GlyphInfo info;
+                info.codepoint = codepoint;
+                info.size = {0, 0};
+                info.bearing = {0, 0};
+                info.advance = ft_face_->glyph->advance.x;
+                info.uv_rect = {0, 0, 0, 0};
+                glyphs_[codepoint] = info;
+                return &glyphs_.at(codepoint);
+            }
+        }
+        return nullptr;
+    }
+
+    void draw(const Renderer::TextRenderer::TextParams& params) {
+        if (!ft_face_ || !atlas_texture_obj_) return;
+
+        sprite_renderer_->begin(glm::ortho(0.0f, static_cast<float>(renderer_.get_width()),
+                                           static_cast<float>(renderer_.get_height()), 0.0f));
+
+        // Layout: wrap and compute line positions
+        struct Line {
+            float x = 0;
+            float y = 0;
+            float width = 0;
+        };
+        std::vector<Line> lines;
+        lines.emplace_back();
+
+        float scale = params.size / font_size_;
+        float line_height = params.line_height * font_size_ * scale;
+        float cursor_x = 0.0f;
+        float cursor_y = 0.0f;
+        float max_width = 0.0f;
+
+        auto measure_word = [&](const std::string& word) -> float {
+            float w = 0;
+            for (char c : word) {
+                if (auto* g = get_glyph(static_cast<uint32_t>(static_cast<unsigned char>(c)))) {
+                    w += static_cast<float>(g->advance) / 64.0f * scale;
+                    w += params.letter_spacing * scale;
+                }
+            }
+            return w;
+        };
+
+        // Simple wrapping by words
+        size_t i = 0;
+        while (i < params.text.size()) {
+            char c = params.text[i];
+            if (c == '\n') {
+                lines.back().width = cursor_x;
+                max_width = std::max(max_width, cursor_x);
+                lines.emplace_back();
+                cursor_x = 0;
+                cursor_y += line_height;
+                ++i;
+                continue;
+            }
+
+            if (c == ' ') {
+                if (params.wrap_width > 0 && cursor_x + params.letter_spacing * scale > params.wrap_width) {
+                    lines.back().width = cursor_x;
+                    max_width = std::max(max_width, cursor_x);
+                    lines.emplace_back();
+                    cursor_x = 0;
+                    cursor_y += line_height;
+                } else {
+                    cursor_x += params.letter_spacing * scale;
+                }
+                ++i;
+                continue;
+            }
+
+            // Collect a word
+            size_t word_start = i;
+            while (i < params.text.size() && params.text[i] != ' ' && params.text[i] != '\n') {
+                ++i;
+            }
+            std::string word = params.text.substr(word_start, i - word_start);
+            float word_w = measure_word(word);
+
+            if (params.wrap_width > 0 && cursor_x + word_w > params.wrap_width && cursor_x > 0) {
+                lines.back().width = cursor_x;
+                max_width = std::max(max_width, cursor_x);
+                lines.emplace_back();
+                cursor_x = 0;
+                cursor_y += line_height;
+            }
+
+            // Render each char in the word
+            for (char wc : word) {
+                auto* g = get_glyph(static_cast<uint32_t>(static_cast<unsigned char>(wc)));
+                if (!g) {
+                    cursor_x += params.letter_spacing * scale;
+                    continue;
+                }
+
+                float gw = g->size.x * scale;
+                float gh = g->size.y * scale;
+                if (gw > 0 && gh > 0) {
+                    Renderer::SpriteRenderer::Sprite sprite;
+                    sprite.position = {
+                        cursor_x + g->bearing.x * scale,
+                        cursor_y + (font_size_ - g->bearing.y) * scale - gh
+                    };
+                    sprite.size = {gw, gh};
+                    sprite.color = params.color;
+                    sprite.texture = atlas_texture_obj_;
+                    sprite.uv_rect = g->uv_rect;
+                    sprite.layer = 0;
+                    sprite_renderer_->draw(sprite);
+                }
+                cursor_x += static_cast<float>(g->advance) / 64.0f * scale;
+                cursor_x += params.letter_spacing * scale;
+            }
+        }
+
+        lines.back().width = cursor_x;
+        max_width = std::max(max_width, cursor_x);
+        float total_height = cursor_y + line_height;
+
+        // Apply alignment
+        // Note: we already rendered left-aligned; for center/right we'd need a second pass.
+        // For now, store alignment info and re-render if needed. Simple approach: render left-aligned.
+        (void)lines;
+        (void)max_width;
+        (void)total_height;
+
+        sprite_renderer_->end();
+    }
+
+    glm::vec2 measure_text(const std::string& text, float size) const {
+        if (!ft_face_) return {0, 0};
+        float scale = size / font_size_;
+        float line_height = 1.2f * font_size_ * scale;
+        float cursor_x = 0;
+        float cursor_y = 0;
+        float max_width = 0;
+
+        for (char c : text) {
+            if (c == '\n') {
+                max_width = std::max(max_width, cursor_x);
+                cursor_x = 0;
+                cursor_y += line_height;
+                continue;
+            }
+            if (c == ' ') {
+                cursor_x += 0.5f * size * scale;  // rough space width
+                continue;
+            }
+            if (auto it = glyphs_.find(static_cast<uint32_t>(static_cast<unsigned char>(c)));
+                it != glyphs_.end()) {
+                cursor_x += static_cast<float>(it->second.advance) / 64.0f * scale;
+            } else {
+                cursor_x += 0.5f * size * scale;
+            }
+        }
+        max_width = std::max(max_width, cursor_x);
+        return {max_width, cursor_y + line_height};
+    }
 };
 
 Renderer::TextRenderer::TextRenderer(Renderer& renderer)
@@ -539,17 +902,16 @@ Renderer::TextRenderer::TextRenderer(Renderer& renderer)
 
 Renderer::TextRenderer::~TextRenderer() = default;
 
-bool Renderer::TextRenderer::load_font(const std::filesystem::path&, float) {
-    // TODO: implement font loading (stb_truetype or freetype)
-    return false;
+bool Renderer::TextRenderer::load_font(const std::filesystem::path& path, float size) {
+    return impl_->load_font(path, size);
 }
 
-void Renderer::TextRenderer::draw(const TextParams&) {
-    // TODO: implement
+void Renderer::TextRenderer::draw(const TextParams& params) {
+    impl_->draw(params);
 }
 
-glm::vec2 Renderer::TextRenderer::measure_text(const std::string&, float) const {
-    return {0, 0};
+glm::vec2 Renderer::TextRenderer::measure_text(const std::string& text, float size) const {
+    return impl_->measure_text(text, size);
 }
 
 } // namespace tensyoki

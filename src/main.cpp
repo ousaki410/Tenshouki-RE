@@ -152,6 +152,28 @@ private:
         // Test resource parsing
         test_resource_parsing();
         
+        // Initialize text renderer with default font
+        text_renderer_ = std::make_unique<Renderer::TextRenderer>(*renderer_);
+        const char* default_fonts[] = {
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            nullptr
+        };
+        bool font_loaded = false;
+        for (const char* font_path : default_fonts) {
+            if (!font_path) break;
+            if (std::filesystem::exists(font_path)) {
+                if (text_renderer_->load_font(font_path, 24.0f)) {
+                    LOG_INFO("Loaded font: {} (24pt)", font_path);
+                    font_loaded = true;
+                    break;
+                }
+            }
+        }
+        if (!font_loaded) {
+            LOG_WARN("No TrueType font found; text rendering unavailable");
+        }
+
         LOG_INFO("Initialization complete");
         return true;
     }
@@ -411,6 +433,31 @@ private:
         // Resource browser
         if (show_resource_browser_) {
             render_resource_browser();
+        }
+        
+        // Text rendering demo
+        if (text_renderer_) {
+            ImGui::Begin("Text Demo", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+            text_renderer_->draw(Renderer::TextRenderer::TextParams{
+                .text = "Tensyoki - Nobunaga's Ambition: Tenshouki HD",
+                .position = {10.0f, 10.0f},
+                .size = 32.0f,
+                .color = {1.0f, 1.0f, 1.0f, 1.0f},
+            });
+            text_renderer_->draw(Renderer::TextRenderer::TextParams{
+                .text = "Linux native port - Phase 3: Data layer + Rendering core",
+                .position = {10.0f, 50.0f},
+                .size = 20.0f,
+                .color = {0.8f, 0.8f, 1.0f, 1.0f},
+            });
+            text_renderer_->draw(Renderer::TextRenderer::TextParams{
+                .text = "Wrapping test: this is a longer line of text that should wrap at the specified width.",
+                .position = {10.0f, 80.0f},
+                .size = 18.0f,
+                .color = {1.0f, 0.8f, 0.8f, 1.0f},
+                .wrap_width = 400.0f,
+            });
+            ImGui::End();
         }
         
         // Status bar
@@ -753,6 +800,9 @@ private:
     int preview_height_ = 0;
     std::string preview_container_;
     uint32_t preview_entry_index_ = 0;
+
+    // Text rendering
+    std::unique_ptr<Renderer::TextRenderer> text_renderer_;
 };
 
 } // namespace tensyoki
