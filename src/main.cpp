@@ -445,7 +445,7 @@ private:
             // Clear screen
             renderer_->clear(0.1f, 0.1f, 0.15f, 1.0f);
             
-            // Update game state system
+            // Update game state system and game clock
             if (game_initialized_) {
                 static float accumulator = 0.0f;
                 float dt = 1.0f / 60.0f;
@@ -455,6 +455,13 @@ private:
                         running = false;
                     }
                     accumulator -= dt;
+                }
+                
+                // Advance game clock (date progression)
+                int days = game_ctx_.clock.update(dt, game_ctx_.date);
+                if (days > 0) {
+                    LOG_DEBUG("Date advanced {} day(s): {}", days,
+                              game_ctx_.date.to_string().c_str());
                 }
             }
             

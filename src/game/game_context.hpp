@@ -38,6 +38,7 @@ public:
     std::unique_ptr<SndataArchive> sndata;
     GT1GTextureCache* tex_cache = nullptr;  // not owned, points to Application's cache
     GameDate date;
+    GameClock clock;
 };
 
 } // namespace tensyoki

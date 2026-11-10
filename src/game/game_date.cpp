@@ -51,11 +51,29 @@ void GameDate::advance_day() {
 }
 
 void GameDate::advance_month() {
+    int16_t old_year = year;
     ++month;
     if (month > 12) {
         month = 1;
         ++year;
+        if (on_year_change) on_year_change(year);
     }
+    if (on_month_change) on_month_change(year, month);
+}
+
+int GameClock::update(float dt, GameDate& date) {
+    if (paused) return 0;
+
+    accumulator += dt * speed;
+    int days_advanced = 0;
+
+    while (accumulator >= seconds_per_day) {
+        accumulator -= seconds_per_day;
+        date.advance_day();
+        days_advanced++;
+    }
+
+    return days_advanced;
 }
 
 } // namespace tensyoki

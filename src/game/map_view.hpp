@@ -2,11 +2,13 @@
  * map_view.hpp - Strategic map view for Phase 4
  *
  * Renders castles from sndata.dat on a 2D map with:
- *   - Castle markers (textured or colored dots)
- *   - Castle names
- *   - Routes between castles
- *   - Camera zoom/pan
- *   - Click-to-select castle
+ *   - Castle markers (colored dots with optional portraits)
+ *   - Castle names with UTF-8/CJK support
+ *   - Routes between nearby castles
+ *   - Region boundaries (clusters of castles)
+ *   - Camera zoom/pan with keyboard/mouse
+ *   - Click-to-select castle with detail popup
+ *   - Date/season overlay
  */
 
 #pragma once
@@ -15,12 +17,13 @@
 #include "resource/bin_parser.hpp"
 #include "resource/dat_parser.hpp"
 #include "resource/gt1g_texture_cache.hpp"
+#include "game/game_date.hpp"
 #include <unordered_map>
 #include <optional>
 
 namespace tensyoki {
 
-/// Castle position on the map
+/// Castle position and state on the map
 struct CastlePos {
     uint32_t index = 0;
     float x = 0.0f;   // Map coordinates
@@ -28,6 +31,8 @@ struct CastlePos {
     std::string name;
     std::string name_utf8;
     bool selected = false;
+    bool hovered = false;
+    uint32_t region_id = 0;  // Which region this castle belongs to
 };
 
 /// Camera for the map
@@ -37,7 +42,22 @@ struct MapCamera {
     float zoom = 1.0f;
 };
 
-/// Map view: renders castles and routes
+/// Route between two castles
+struct MapRoute {
+    uint32_t from = 0;
+    uint32_t to = 0;
+    float distance = 0.0f;
+};
+
+/// Region (province) on the map
+struct MapRegion {
+    uint32_t id = 0;
+    std::string name;
+    glm::vec4 color = {0.5f, 0.5f, 0.5f, 0.3f};  // Fill color
+    std::vector<uint32_t> castle_indices;
+};
+
+/// Map view: renders castles, routes, regions, and UI
 class MapView {
 public:
     MapView();
@@ -51,16 +71,16 @@ public:
               Renderer& renderer);
 
     /// Update camera/zoom based on input (called each frame)
-    void update(float dt);
+    void update(float dt, Renderer& renderer);
 
-    /// Render the map (castles, routes, names)
+    /// Render the map (castles, routes, regions, names)
     void render(Renderer& renderer);
 
     /// Handle mouse click: returns true if a castle was clicked
     bool handle_click(float mx, float my, Renderer& renderer);
 
     /// Get currently selected castle index
-    std::optional<uint32_t> selected_castle() const;
+    std::optional<uint32_t> selected_castle() const { return selected_; }
 
     /// Set whether to show castle names
     void set_show_names(bool v) { show_names_ = v; }
@@ -68,12 +88,24 @@ public:
     /// Set whether to show routes
     void set_show_routes(bool v) { show_routes_ = v; }
 
+    /// Set whether to show region boundaries
+    void set_show_regions(bool v) { show_regions_ = v; }
+
+    /// Get reference to castles for external access
+    const std::vector<CastlePos>& castles() const { return castles_; }
+
+    /// Get reference to regions
+    const std::vector<MapRegion>& regions() const { return regions_; }
+
 private:
-    // Generate pseudo-random positions for castles (deterministic)
+    // Generate deterministic positions based on castle index (regional clusters)
     void generate_positions();
 
-    // Build route connections between nearby castles
+    // Build route connections between nearby castles (within same region)
     void build_routes();
+
+    // Group castles into regions based on position proximity
+    void build_regions();
 
     // Convert map coords to screen coords
     glm::vec2 map_to_screen(float mx, float my) const;
@@ -81,11 +113,19 @@ private:
     // Convert screen coords to map coords
     glm::vec2 screen_to_map(float sx, float sy) const;
 
+    // Handle camera movement from keyboard
+    void handle_camera_input(Renderer& renderer, float dt);
+
+    // Handle mouse wheel zoom
+    void handle_mouse_wheel(Renderer& renderer, float y_offset);
+
     MapCamera camera_;
     std::vector<CastlePos> castles_;
-    std::vector<std::pair<uint32_t, uint32_t>> routes_;  // castle index pairs
+    std::vector<MapRoute> routes_;
+    std::vector<MapRegion> regions_;
     bool show_names_ = true;
     bool show_routes_ = true;
+    bool show_regions_ = true;
     std::optional<uint32_t> selected_;
     GT1GTextureCache* tex_cache_ = nullptr;
     Renderer* renderer_ = nullptr;

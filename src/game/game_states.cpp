@@ -88,7 +88,7 @@ void MapViewState::enter() {
 }
 
 bool MapViewState::update(float dt) {
-    map_view_.update(dt);
+    map_view_.update(dt, *ctx_.renderer);
     return true;
 }
 
@@ -107,6 +107,7 @@ void MapViewState::render() {
         return;
     }
 
+    // Full-screen map overlay
     ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
     ImGui::SetNextWindowSize({(float)ctx_.renderer->get_width(),
                               (float)ctx_.renderer->get_height()},
@@ -116,29 +117,19 @@ void MapViewState::render() {
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoBackground);
 
-    // Draw map using ImGui draw list (simpler than raw OpenGL for now)
-    ImDrawList* draw = ImGui::GetBackgroundDrawList();
-    ImVec2 win_pos = ImGui::GetWindowPos();
-    ImVec2 win_size = ImGui::GetWindowSize();
-    ImVec2 center = {win_pos.x + win_size.x * 0.5f, win_pos.y + win_size.y * 0.5f};
+    map_view_.render(*ctx_.renderer);
 
-    // Camera (simple, centered for now)
-    float cam_x = 0.0f, cam_y = 0.0f, zoom = 1.0f;
-
-    // Render routes
-    // We need access to routes from map_view_, but MapView doesn't expose them yet.
-    // For now, render castles only.
-
-    // Render castles
-    // Note: We can't directly access castles_ from here since it's private.
-    // In a full implementation, MapView would expose a render() method.
-    // For now, we render castle names via ImGui.
+    // Handle mouse clicks on the map
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        ImVec2 mouse = ImGui::GetMousePos();
+        map_view_.handle_click(mouse.x, mouse.y, *ctx_.renderer);
+    }
 
     ImGui::End();
 
     // Render castle info panel
     ImGui::SetNextWindowPos({10, 10}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({300, 400}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({320, 420}, ImGuiCond_Always);
     ImGui::Begin("Map Info", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
@@ -148,11 +139,47 @@ void MapViewState::render() {
     ImGui::Text("Castles: %zu", ctx_.sndata ? ctx_.sndata->castle_count() : 0);
     ImGui::Text("Officers: %zu", ctx_.sndata ? ctx_.sndata->officer_count() : 0);
     ImGui::Separator();
-    ImGui::Text("Click on a castle to select");
-    ImGui::Text("ESC: Return to menu");
 
+    auto sel = map_view_.selected_castle();
+    if (sel) {
+        const CastlePos* cp = nullptr;
+        for (const auto& c : map_view_.castles()) {
+            if (c.index == *sel) { cp = &c; break; }
+        }
+        if (cp) {
+            ImGui::Text("Selected: %s",
+                        cp->name_utf8.empty() ? cp->name.c_str()
+                                              : cp->name_utf8.c_str());
+            ImGui::Text("Position: (%.0f, %.0f)", cp->x, cp->y);
+            ImGui::Text("Region: %u", cp->region_id);
+        }
+    } else {
+        ImGui::Text("Click on a castle to select");
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Date/Time Controls:");
+    ImGui::Text("Pause: %s", ctx_.clock.paused ? "ON" : "OFF");
+    ImGui::SameLine();
+    if (ImGui::Button(ctx_.clock.paused ? "Resume" : "Pause")) {
+        ctx_.clock.paused = !ctx_.clock.paused;
+    }
+    ImGui::SameLine();
+    ImGui::Text("Speed: %.1fx", ctx_.clock.speed);
+    if (ImGui::Button("-")) {
+        ctx_.clock.speed = std::max(0.5f, ctx_.clock.speed - 0.5f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+")) {
+        ctx_.clock.speed = std::min(8.0f, ctx_.clock.speed + 0.5f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("1x")) {
+        ctx_.clock.speed = 1.0f;
+    }
+    ImGui::Separator();
     if (ImGui::Button("Return to Menu")) {
-        // This would be handled by Application
+        // Handled by Application
     }
 
     ImGui::End();
