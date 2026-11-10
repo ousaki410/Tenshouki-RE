@@ -5,7 +5,7 @@
  *
  *   0x00  char[4]  magic       "LINK"
  *   0x04  u32      entry_count number of table entries
- *   0x08  u32      version     1 in all six known res/*.bin files
+ *   0x08  u32      version     1 in all six known containers under res/
  *   0x0C  u32      reserved    0 in all known files
  *   0x10  entries  entry_count * { u32 absolute_offset, u32 size }
  *
