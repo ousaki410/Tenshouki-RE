@@ -7,7 +7,7 @@ Tests: covered by `src/test/test_bin_parser.cpp` (synthetic GT1G block)
 
 ## 1. Overview
 
-`GT1G` with version string `0600` is the data section of nested `LINK` containers in `res/res_grp.bin`, `res/res_exp.bin`, and `res/res_exp_pc.bin` (see [link.md](link.md)). It holds one or more textures. The matching descriptor table in the nested `LINK` lists rectangles inside those textures.
+`GT1G` with version string `0600` is the data block of 16 nested `LINK` containers in `res/res_grp.bin` (top-level entries 0, 2-14, 18, and 19), and of the single nested containers in `res/res_exp.bin` and `res/res_exp_pc.bin` (see [link.md](link.md)). The other four nested containers in `res_grp.bin` (entries 15, 16, 17, 20) hold `LWC` blocks instead (see [lwc.md](lwc.md)). A GT1G block holds one or more textures. The matching descriptor table in the nested `LINK` lists rectangles inside those textures.
 
 The tag is commonly associated with a texture container format used by KOEI TECMO titles. The layout below is derived only from the samples; public documentation has not been compared yet.
 
@@ -34,7 +34,7 @@ Provenance: third-party repackaged distribution; re-verify against retail files 
 | ---: | ---: | --- | --- | --- | --- |
 | 0x00 | 4 | char[4] | magic | `GT1G` | observed |
 | 0x04 | 4 | char[4] | version | `0600` | observed |
-| 0x08 | 4 | u32 | total_size | 0x480070, equal to the nested `LINK` data size | observed |
+| 0x08 | 4 | u32 | total_size | 0x480070, equal to the size of its data entry in the nested `LINK` | observed |
 | 0x0C | 4 | u32 | header_size | 0x28, equal to 28 + 4 * count | observed |
 | 0x10 | 4 | u32 | texture_count | 3 | observed |
 | 0x14 | 4 | u32 | unknown | 0 | hypothesis (platform id) |
@@ -100,10 +100,11 @@ No pixel bytes are stored in this repository.
 
 - Which record reaches x + w = 1,280 in `res_grp` entry 0? A 1,280-wide record cannot fit in a 1,024-wide texture, so either it belongs to a different texture than assumed or coordinates are not always pixels.
 - Meaning of bytes 0x03 to 0x07 and 0x0C to 0x13 in the texture entry header.
-- Pixel formats of textures 1 and 2 and of other nested containers in `res_grp.bin` (entries 1 to 20).
+- Pixel formats of textures 1 and 2 and of the other `GT1G` containers in `res_grp.bin` (entries 0, 2-14, 18, 19; entries 15-17 and 20 hold `LWC`, entry 1 holds `_N1G`).
 
 ## 11. Changelog
 
 | Date | Change | Evidence |
 | --- | --- | --- |
 | 2026-10-12 | Initial draft | E-0016..E-0019 |
+| 2026-11-10 | Parser implemented; scope clarified to the 16 `res_grp` entries with GT1G data (the other four hold LWC) | E-0020, E-0022 |

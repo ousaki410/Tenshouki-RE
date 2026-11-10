@@ -75,7 +75,7 @@ std::vector<uint8_t> make_nested_link(const std::vector<uint8_t>& gt1g) {
 
     std::vector<uint8_t> nested(data_offset + gt1g.size(), 0);
     std::copy_n("LINK", 4, nested.begin());
-    put_u32(nested, 0x04, 1);                              // version
+    put_u32(nested, 0x04, 1);                              // data entry count
     put_u32(nested, 0x08, 0x20);                           // data table offset
     put_u32(nested, 0x0C, record_count);                   // descriptor record count
     put_u32(nested, 0x10, descriptor_offset);              // descriptor offset
@@ -96,6 +96,48 @@ std::vector<uint8_t> make_nested_link(const std::vector<uint8_t>& gt1g) {
     }
 
     std::copy(gt1g.begin(), gt1g.end(), nested.begin() + data_offset);
+    return nested;
+}
+
+/// Wrap three LWC blocks in a nested LINK container, like res_grp entries 15-20
+std::vector<uint8_t> make_lwc_nested_link() {
+    constexpr uint32_t descriptor_offset = 0x40;
+    constexpr uint32_t record_count = 3;
+    constexpr uint32_t first_data = 0x80;
+    const std::vector<uint32_t> sizes = {0x30, 0x20, 0x10};
+
+    std::vector<uint32_t> offsets;
+    uint32_t cursor = first_data;
+    for (uint32_t size : sizes) {
+        offsets.push_back(cursor);
+        cursor += size;
+    }
+
+    std::vector<uint8_t> nested(cursor, 0);
+    std::copy_n("LINK", 4, nested.begin());
+    put_u32(nested, 0x04, record_count);       // data entry count
+    put_u32(nested, 0x08, 0x20);               // data table offset
+    put_u32(nested, 0x0C, record_count);       // descriptor record count
+    put_u32(nested, 0x10, descriptor_offset);
+
+    for (uint32_t i = 0; i < record_count; ++i) {
+        put_u32(nested, 0x20 + i * 8, offsets[i]);
+        put_u32(nested, 0x20 + i * 8 + 4, sizes[i]);
+
+        size_t pos = descriptor_offset + i * 12;
+        put_u16(nested, pos + 0, static_cast<uint16_t>(i * 16));
+        put_u16(nested, pos + 2, 0);
+        put_u16(nested, pos + 4, 16);
+        put_u16(nested, pos + 6, 16);
+        put_u32(nested, pos + 8, i);
+
+        size_t block = offsets[i];
+        nested[block + 0] = 'L';
+        nested[block + 1] = 'W';
+        nested[block + 2] = 'C';
+        nested[block + 3] = 0x1A;
+        nested[block + 4] = static_cast<uint8_t>(sizes[i] & 0xFF);
+    }
     return nested;
 }
 
@@ -347,7 +389,11 @@ TEST_F(BinArchiveTest, NestedLinkAndGt1g) {
     auto nested_info = archive.parse_nested(archive.entries()[0]);
     ASSERT_TRUE(nested_info) << tensyoki::to_string(nested_info.error());
 
-    EXPECT_EQ(nested_info->version, 1u);
+    EXPECT_EQ(nested_info->data_entry_count, 1u);
+    ASSERT_EQ(nested_info->data_entries.size(), 1u);
+    EXPECT_EQ(nested_info->data_entries[0].offset, 0x60u);
+    EXPECT_EQ(nested_info->data_entries[0].size, static_cast<uint32_t>(gt1g.size()));
+    EXPECT_EQ(nested_info->data_entries[0].signature, "GT1G");
     EXPECT_EQ(nested_info->record_count, 2u);
     ASSERT_EQ(nested_info->records.size(), 2);
     EXPECT_EQ(nested_info->records[0].x, 10);
@@ -364,6 +410,46 @@ TEST_F(BinArchiveTest, NestedLinkAndGt1g) {
     EXPECT_EQ(gt.textures[0].height, 4u);
     EXPECT_EQ(gt.textures[0].data_offset, 0x40u);
     EXPECT_EQ(gt.textures[0].data_size, 0x40u);
+}
+
+TEST_F(BinArchiveTest, NestedMultipleLwcBlocks) {
+    auto nested_payload = make_lwc_nested_link();
+
+    constexpr uint32_t table_end = 0x18; // one entry
+    std::vector<uint8_t> data(table_end + nested_payload.size() + 4, 0);
+    std::copy_n("LINK", 4, data.begin());
+    put_u32(data, 0x04, 1);
+    put_u32(data, 0x08, 1);
+    put_u32(data, 0x10, table_end);
+    put_u32(data, 0x14, static_cast<uint32_t>(nested_payload.size()));
+    std::copy(nested_payload.begin(), nested_payload.end(), data.begin() + table_end);
+    put_u32(data, table_end + nested_payload.size(), BinArchive::SENTINEL);
+
+    auto path = test_dir_ / "lwc_blocks.bin";
+    write_file(path, data);
+
+    BinArchive archive;
+    auto result = archive.load_from_file(path);
+    ASSERT_TRUE(result) << tensyoki::to_string(result.error());
+
+    auto info = archive.parse_nested(archive.entries()[0]);
+    ASSERT_TRUE(info) << tensyoki::to_string(info.error());
+
+    EXPECT_EQ(info->data_entry_count, 3u);
+    ASSERT_EQ(info->data_entries.size(), 3u);
+    EXPECT_EQ(info->data_entries[0].offset, 0x80u);
+    EXPECT_EQ(info->data_entries[0].size, 0x30u);
+    EXPECT_EQ(info->data_entries[1].offset, 0xB0u);
+    EXPECT_EQ(info->data_entries[2].offset, 0xD0u);
+    for (const auto& block : info->data_entries) {
+        EXPECT_EQ(block.signature, "LWC");
+    }
+
+    EXPECT_EQ(info->record_count, 3u);
+    ASSERT_EQ(info->records.size(), 3u);
+    EXPECT_EQ(info->records[2].x, 32);
+    EXPECT_EQ(info->records[2].texture_index, 2u);
+    EXPECT_FALSE(info->textures.has_value());
 }
 
 TEST_F(BinArchiveTest, NotANestedLink) {
@@ -452,8 +538,8 @@ TEST_F(BinArchiveTest, ParseAllRealContainersWhenAvailable) {
     }
 }
 
-/// res_grp entry 1 is a `_N1G` payload, not a nested LINK container
-TEST_F(BinArchiveTest, ResGrpN1gSignatureWhenAvailable) {
+/// res_grp entry 1 is a `_N1G` payload; entries 15, 16, 17 and 20 hold LWC blocks
+TEST_F(BinArchiveTest, ResGrpSignaturesWhenAvailable) {
     const char* root = std::getenv("TENSYOKI_DATA_ROOT");
     if (!root) {
         GTEST_SKIP() << "TENSYOKI_DATA_ROOT not set";
@@ -479,6 +565,17 @@ TEST_F(BinArchiveTest, ResGrpN1gSignatureWhenAvailable) {
         if (e.is_nested_link) nested++;
     }
     EXPECT_EQ(nested, 20u);
+
+    // Four nested containers carry LWC blocks rather than GT1G textures
+    for (uint32_t index : {15u, 16u, 17u, 20u}) {
+        ASSERT_LT(index, archive.entries().size());
+        auto info = archive.parse_nested(archive.entries()[index]);
+        ASSERT_TRUE(info) << "entry " << index << ": " << tensyoki::to_string(info.error());
+        ASSERT_FALSE(info->data_entries.empty()) << "entry " << index;
+        EXPECT_EQ(info->data_entries.front().signature, "LWC") << "entry " << index;
+        EXPECT_EQ(info->data_entry_count, info->record_count) << "entry " << index;
+        EXPECT_FALSE(info->textures.has_value()) << "entry " << index;
+    }
 }
 
 } // namespace test

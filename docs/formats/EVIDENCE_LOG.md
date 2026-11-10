@@ -235,3 +235,23 @@ Common to E-0001..E-0019: date 2026-10-12; method static inspection (`ls`, `sha2
 - Hex excerpt (<= 64 bytes): `5f 4e 31 47 30 30 30 30 3c a7 38 00 6c 0b 00 00 00 00 00 00 cc 91 07 00 2d 00 00 00 03 00 00 00 6c 0b 00 00 b4 85 03 00 b4 91 05 00 ff ff ff 00 ff ff ff 11`
 - Related format document: link.md section 8
 - Result: inconclusive (tag and header observed; layout not decoded)
+
+### E-0022: nested +0x04 is a data-entry count, not a version
+
+- Date: 2026-11-10
+- Source file: `res/res_grp.bin`
+- Size (bytes): 365574996
+- SHA-256: e31700c0262cc6aa82f8b9e6a643fa049e88c2293caadf0f42da99b6bf3ff5d7
+- Game version / build: HD Power Up Kit, third-party repackaged distribution (same as E-0001..E-0004)
+- Provenance: third-party repackaged distribution; re-verify against retail files
+- Method: static inspection
+- Command(s): read the nested header and iterate the data table at +0x08 for every top-level `LINK` payload
+- Observation:
+  - The u32 at nested +0x04 equals the number of `{offset, size}` pairs in the data table at +0x08. It is 1 for the 16 nested containers that hold one `GT1G` block, and 57, 856, 215, 6800 for top-level entries 15, 16, 17, 20.
+  - The data table ends at 0x1E8, 0x1AE0, 0x6D8, 0xD4A0 for entries 15, 16, 17, 20; the descriptor table starts at 0x200, 0x1AE0, 0x6E0, 0xD4A0, so the table never overlaps the descriptors.
+  - The descriptor table ends at or before the first data block, and the last data block ends exactly at the outer payload size in all 20 nested containers of `res_grp.bin`.
+  - All 57 + 856 + 215 + 6800 data entries of the four multi-block containers start with `LWC 1A` (first block headers `4C 57 43 1A 38 00 04 00`, `4C 57 43 1A 38 00 08 00`, `4C 57 43 1A 38 00 04 00`, `4C 57 43 1A 38 40 00 00`). All block offsets are 16-byte aligned.
+  - This contradicts the earlier hypothesis in link.md that +0x04 is a version field fixed at 1; the three GT1G samples happened to have exactly one data block.
+- Hex excerpt (<= 64 bytes): `4c 49 4e 4b 39 00 00 00 20 00 00 00 39 00 00 00 00 02 00 00 00 00 00 00` / first LWC block `4c 57 43 1a 38 00 04 00`
+- Related format documents: link.md section 7, lwc.md
+- Result: contradicts the version hypothesis; supports `data_entry_count` and multi-block data tables

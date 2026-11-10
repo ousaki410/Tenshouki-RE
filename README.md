@@ -14,8 +14,8 @@ A native Linux port of *Nobunaga's Ambition: Tenshouki* (信長の野望・天�
 **Phase 2 (clean build / baseline validation) — in progress** 🔧
 - Build system, API drift and ownership issues fixed
 - `BinArchive` rewritten to the documented LINK layout (16-byte header, 8-byte table,
-  `0x89ABCDEF` sentinels, nested LINK/GT1G decoding); `tools/verify_resources.py`
-  passes all six `res/*.bin` containers
+  `0x89ABCDEF` sentinels, nested LINK with multi-block GT1G/LWC data);
+  `tools/verify_resources.py` passes all six `res/*.bin` containers
 
 ## Game files
 
@@ -87,7 +87,7 @@ TENSYOKI_DATA_ROOT="/path/to/game/dir" ctest --test-dir build --output-on-failur
 export TENSYOKI_DATA_ROOT=/path/to/game/data
 ./build/tensyoki
 
-# Headless self-check: parse all six containers, decode nested LINK/GT1G, exit
+# Headless self-check: parse all six containers, decode nested LINK/GT1G/LWC, exit
 ./build/tensyoki --check-resources "/path/to/game/dir"
 ```
 

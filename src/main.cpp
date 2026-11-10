@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
@@ -242,6 +243,8 @@ private:
             }
 
             size_t nested_links = 0;
+            size_t data_blocks = 0;
+            size_t lwc_blocks = 0;
             size_t textures = 0;
             for (const auto& entry : archive.entries()) {
                 if (!entry.is_nested_link) continue;
@@ -253,17 +256,22 @@ private:
                     continue;
                 }
                 nested_links++;
+                data_blocks += nested->data_entries.size();
+                for (const auto& block : nested->data_entries) {
+                    if (block.signature == "LWC") lwc_blocks++;
+                }
                 if (nested->textures) textures += nested->textures->texture_count;
-                LOG_DEBUG("{}: entry {}: {} records, {} textures", name, entry.index,
+                LOG_DEBUG("{}: entry {}: {} data blocks, {} records, {} textures",
+                          name, entry.index, nested->data_entry_count,
                           nested->record_count,
                           nested->textures ? nested->textures->texture_count : 0);
             }
 
             const auto info = archive.info();
             LOG_INFO("{}: version {}, {} entries, {} sentinels, {} bytes, "
-                     "{} nested links, {} textures",
+                     "{} nested links, {} data blocks ({} LWC), {} textures",
                      name, info.version, info.file_count, info.sentinel_count,
-                     info.total_size, nested_links, textures);
+                     info.total_size, nested_links, data_blocks, lwc_blocks, textures);
         }
 
         LOG_INFO("Resource check: {}", ok ? "PASS" : "FAIL");
@@ -526,10 +534,20 @@ private:
             if (nested) {
                 ImGui::Separator();
                 ImGui::Text("Nested LINK");
-                ImGui::Text("  Version: %u", nested->version);
+                ImGui::Text("  Data blocks: %u", nested->data_entry_count);
+                for (size_t i = 0; i < nested->data_entries.size() && i < 8; ++i) {
+                    const auto& block = nested->data_entries[i];
+                    ImGui::BulletText("#%u: %s at 0x%X (%u bytes)",
+                                      static_cast<unsigned>(i),
+                                      block.signature.empty() ? "(unknown)" : block.signature.c_str(),
+                                      block.offset, block.size);
+                }
+                if (nested->data_entries.size() > 8) {
+                    ImGui::TextDisabled("  ... %u more",
+                                        static_cast<unsigned>(nested->data_entries.size() - 8));
+                }
                 ImGui::Text("  Records: %u", nested->record_count);
                 ImGui::Text("  Descriptor offset: 0x%X", nested->descriptor_offset);
-                ImGui::Text("  Data: 0x%X (%u bytes)", nested->data_offset, nested->data_size);
                 if (nested->textures) {
                     ImGui::Text("  GT1G textures: %u", nested->textures->texture_count);
                     for (const auto& tex : nested->textures->textures) {
@@ -540,7 +558,7 @@ private:
                 }
             } else {
                 ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Nested parse failed: %s",
-                                   tensyoki::to_string(nested.error()));
+                                   std::string(tensyoki::to_string(nested.error())).c_str());
             }
         }
 
@@ -585,7 +603,7 @@ private:
                     
                     // Hex bytes
                     for (int col = 0; col < bytes_per_row; ++col) {
-                        size_t idx = offset + col;
+                        size_t idx = offset + static_cast<size_t>(col);
                         if (idx < dump_size) {
                             ImGui::Text("%02X ", data[idx]);
                         } else {
@@ -599,7 +617,7 @@ private:
                     ImGui::Text("|");
                     ImGui::SameLine();
                     for (int col = 0; col < bytes_per_row; ++col) {
-                        size_t idx = offset + col;
+                        size_t idx = offset + static_cast<size_t>(col);
                         if (idx < dump_size) {
                             uint8_t c = data[idx];
                             ImGui::Text("%c", (c >= 32 && c <= 126) ? char(c) : '.');
@@ -612,7 +630,7 @@ private:
                 ImGui::EndChild();
             } else {
                 ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Failed to view data: %s", 
-                                   tensyoki::to_string(view_result.error()));
+                                   std::string(tensyoki::to_string(view_result.error())).c_str());
             }
         }
     }

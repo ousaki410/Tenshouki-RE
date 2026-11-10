@@ -64,10 +64,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 111,
-            "data_offset": 1408,
-            "data_size": 262200,
             "texture_count": 1
           }
         }
@@ -101,10 +102,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 2,
-            "data_offset": 96,
-            "data_size": 8276,
             "texture_count": 2
           }
         }
@@ -138,10 +140,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 372,
-            "data_offset": 4544,
-            "data_size": 4718704,
             "texture_count": 3
           }
         },
@@ -161,10 +164,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 111,
-            "data_offset": 1408,
-            "data_size": 262200,
             "texture_count": 1
           }
         },
@@ -176,10 +180,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 111,
-            "data_offset": 1408,
-            "data_size": 262200,
             "texture_count": 1
           }
         },
@@ -191,10 +196,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 77,
-            "data_offset": 992,
-            "data_size": 1048632,
             "texture_count": 1
           }
         },
@@ -206,10 +212,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 44,
-            "data_offset": 608,
-            "data_size": 32824,
             "texture_count": 1
           }
         },
@@ -221,10 +228,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 1,
-            "data_offset": 96,
-            "data_size": 2097208,
             "texture_count": 1
           }
         },
@@ -236,10 +244,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 1,
-            "data_offset": 96,
-            "data_size": 2097208,
             "texture_count": 1
           }
         },
@@ -251,10 +260,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 1,
-            "data_offset": 96,
-            "data_size": 2097208,
             "texture_count": 1
           }
         },
@@ -266,10 +276,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 1,
-            "data_offset": 96,
-            "data_size": 2097208,
             "texture_count": 1
           }
         },
@@ -281,10 +292,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 22,
-            "data_offset": 352,
-            "data_size": 180868,
             "texture_count": 22
           }
         },
@@ -296,10 +308,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 76,
-            "data_offset": 992,
-            "data_size": 369004,
             "texture_count": 12
           }
         },
@@ -311,10 +324,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 84,
-            "data_offset": 1088,
-            "data_size": 4194360,
             "texture_count": 1
           }
         },
@@ -326,10 +340,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 27,
-            "data_offset": 416,
-            "data_size": 65592,
             "texture_count": 1
           }
         },
@@ -341,10 +356,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 31,
-            "data_offset": 448,
-            "data_size": 127872,
             "texture_count": 31
           }
         },
@@ -356,10 +372,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 57,
+            "data_entry_count": 57,
+            "data_signatures": [
+              "lwc"
+            ],
             "record_count": 57,
-            "data_offset": 1216,
-            "data_size": 146469,
             "texture_count": null
           }
         },
@@ -371,10 +388,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 856,
+            "data_entry_count": 856,
+            "data_signatures": [
+              "lwc"
+            ],
             "record_count": 856,
-            "data_offset": 17152,
-            "data_size": 275226,
             "texture_count": null
           }
         },
@@ -386,10 +404,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 215,
+            "data_entry_count": 215,
+            "data_signatures": [
+              "lwc"
+            ],
             "record_count": 215,
-            "data_offset": 4352,
-            "data_size": 152567,
             "texture_count": null
           }
         },
@@ -401,10 +420,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 42,
-            "data_offset": 576,
-            "data_size": 220340,
             "texture_count": 42
           }
         },
@@ -416,10 +436,11 @@
           "signature": "link",
           "sentinel": true,
           "nested": {
-            "version": 1,
+            "data_entry_count": 1,
+            "data_signatures": [
+              "gt1g"
+            ],
             "record_count": 31,
-            "data_offset": 448,
-            "data_size": 4280992,
             "texture_count": 23
           }
         }
@@ -435,15 +456,15 @@
       "sha256": "e31700c0262cc6aa82f8b9e6a643fa049e88c2293caadf0f42da99b6bf3ff5d7",
       "errors": [],
       "warnings": [
-        "entry 6: data offset 0x60 != predicted 0x50",
-        "entry 7: data offset 0x60 != predicted 0x50",
-        "entry 8: data offset 0x60 != predicted 0x50",
-        "entry 9: data offset 0x60 != predicted 0x50",
-        "entry 10: data offset 0x160 != predicted 0x150",
-        "entry 13: data offset 0x1A0 != predicted 0x190",
-        "entry 15: data offset 0x4C0 != predicted 0x4B0",
-        "entry 16: data offset 0x4300 != predicted 0x4310",
-        "entry 20: data offset 0x21360 != predicted 0x21370"
+        "entry 6: first data offset 0x60 != predicted 0x50",
+        "entry 7: first data offset 0x60 != predicted 0x50",
+        "entry 8: first data offset 0x60 != predicted 0x50",
+        "entry 9: first data offset 0x60 != predicted 0x50",
+        "entry 10: first data offset 0x160 != predicted 0x150",
+        "entry 13: first data offset 0x1A0 != predicted 0x190",
+        "entry 15: first data offset 0x4C0 != predicted 0x4B0",
+        "entry 16: first data offset 0x4300 != predicted 0x4310",
+        "entry 20: first data offset 0x21360 != predicted 0x21370"
       ],
       "hints": []
     },

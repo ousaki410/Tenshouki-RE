@@ -7,7 +7,7 @@ Tests: `src/test/test_bin_parser.cpp` (synthetic + real files via `TENSYOKI_DATA
 
 ## 1. Overview
 
-All six files under `res/` start with the ASCII magic `LINK`: `res_grp.bin`, `res_else.bin`, `res_exp.bin`, `res_exp_pc.bin`, `res_shader.bin`, and `res_snd.bin`. Each holds a table of (offset, size) pairs followed by the payloads. Some payloads are themselves `LINK` containers whose data section is a `GT1G` texture block (see [gt1g.md](gt1g.md)).
+All six files under `res/` start with the ASCII magic `LINK`: `res_grp.bin`, `res_else.bin`, `res_exp.bin`, `res_exp_pc.bin`, `res_shader.bin`, and `res_snd.bin`. Each holds a table of (offset, size) pairs followed by the payloads. Some payloads are themselves `LINK` containers whose data blocks are `GT1G` texture blocks (see [gt1g.md](gt1g.md)) or `LWC` blocks (see [lwc.md](lwc.md)).
 
 The names are read as "graphics", "other", "expression", "shader", and "sound" resources, which is an inference from names only.
 
@@ -28,7 +28,7 @@ Provenance: the samples come from a third-party repackaged distribution. Hashes 
 
 - Endianness: little-endian (observed in all samples).
 - Offsets in the top-level table are absolute from file start.
-- Offsets in nested containers are relative to the start of the nested `LINK` (observed in three samples, see section 7).
+- Offsets in nested containers are relative to the start of the nested `LINK` (observed in all 20 nested containers of `res_grp.bin`).
 
 ## 4. Top-Level Header (16 bytes)
 
@@ -64,25 +64,36 @@ Checked with `tools/link_check.py` over all six files (E-0008, corrected by E-00
 
 ## 7. Nested LINK Containers
 
-First payloads of `res_grp`, `res_exp`, and `res_exp_pc` start with a nested `LINK`. Observed nested header words:
+Nested `LINK` payloads appear in `res_grp`, `res_exp`, and `res_exp_pc`. In `res_grp`, 20 of the 21 entries are nested `LINK` (entry 1 is `_N1G`, section 8); 16 of those carry one `GT1G` data block and 4 carry many `LWC` blocks. Observed header words of the GT1G samples:
 
-| File | +0x04 | +0x08 | +0x0C | +0x10 | Entry at +0x20 (offset, size) | offset + size |
+| File | +0x04 | +0x08 | +0x0C | +0x10 | Data table at +0x20 | Last block end |
 | --- | ---: | ---: | ---: | ---: | --- | ---: |
 | res_grp entry 0 | 1 | 0x20 | 0x174 (372) | 0x40 | (0x11C0, 0x480070) | 0x481230 = outer size |
 | res_exp entry 0 | 1 | 0x20 | 0x6F (111) | 0x40 | (0x580, 0x40038) | 0x405B8 = outer size |
 | res_exp_pc entry 0 | 1 | 0x20 | 2 | 0x40 | (0x60, 0x2054) | 0x20B4 = outer size |
 
-Bytes +0x14 to +0x1F are zero in all three. Offsets are relative to the nested start.
+Multi-block variants in `res_grp` (E-0022):
+
+| Entry | +0x04 | +0x0C | +0x10 | Data table end | First block | Blocks | Payload |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 15 | 57 | 57 | 0x200 | 0x1E8 | 0x4C0 | 57 | 8,572,537 |
+| 16 | 856 | 856 | 0x1AE0 | 0x1AE0 | 0x4300 | 856 | 279,971,722 |
+| 17 | 215 | 215 | 0x6E0 | 0x6D8 | 0x1100 | 215 | 33,245,525 |
+| 20 | 6800 | 6800 | 0xD4A0 | 0xD4A0 | 0x21360 | 6800 | 15,906,032 |
+
+In all 20 nested containers of `res_grp`, the data table fits before the descriptor table, the descriptor table ends at or before the first data block, and the last data block ends exactly at the outer payload size.
+
+Bytes +0x14 to +0x1F are zero in the three GT1G samples. Offsets are relative to the nested start.
 
 ### Nested header fields
 
 | Offset | Type | Name | Meaning | Confidence |
 | ---: | --- | --- | --- | --- |
-| +0x04 | u32 | version | 1 | hypothesis |
-| +0x08 | u32 | data_table_offset | 0x20, location of the data entry | hypothesis |
-| +0x0C | u32 | record_count | number of descriptor records (372, 111, 2) | observed |
-| +0x10 | u32 | descriptor_offset | 0x40, location of the descriptor table | observed |
-| +0x20 | u32 x2 | data_offset, data_size | one data entry; offset + size equals the outer payload size | observed |
+| +0x04 | u32 | data_entry_count | number of `{offset, size}` pairs in the data table; 1 in the 16 GT1G containers, 57/856/215/6800 in the four LWC containers | observed |
+| +0x08 | u32 | data_table_offset | 0x20, location of the data table | observed |
+| +0x0C | u32 | record_count | number of descriptor records (372, 111, 2 in the GT1G samples) | observed |
+| +0x10 | u32 | descriptor_offset | 0x40 in the GT1G samples, 0x200..0xD4A0 in the LWC containers | observed |
+| +0x20 | u32 x2 | data entry | `{offset, size}` of one data block; repeated `data_entry_count` times | observed |
 
 ### Descriptor records (12 bytes each)
 
@@ -115,7 +126,11 @@ Statistics from `link_nested.py` (E-0016):
 
 Unresolved: `res_grp` entry 0 reaches x + w = 1280, but texture 0 is 1,024 wide (gt1g.md). The record that causes this has not been identified. Run `tools/link_nested.py` to list records beyond 1,024.
 
-Data start rule: `data_offset = ((descriptor_offset + 12 * n) rounded down to 16) + 16`. It fits entry 0 of the three samples and predicted 0x11C0 for `res_grp`, which was then observed as the actual `GT1G` start (E-0017). It does not hold for every nested container: `res_grp` entries 6-10, 13, 15, 16 and 20 differ by 0x10 or -0x10 (E-0020), so treat the rule as a property of the tested entry 0 samples rather than a global invariant.
+### LWC data blocks
+
+The four multi-block containers above do not carry `GT1G`. Every one of their data entries starts with ASCII `LWC` followed by `0x1A` and three header bytes. The first block of each container begins `4C 57 43 1A 38 00 04 00` (entry 15), `4C 57 43 1A 38 00 08 00` (entry 16), `4C 57 43 1A 38 00 04 00` (entry 17), and `4C 57 43 1A 38 40 00 00` (entry 20). In these containers `record_count` equals `data_entry_count`, so one descriptor record likely corresponds to one LWC block. The record fields have not been correlated with block contents yet. See [lwc.md](lwc.md).
+
+Data start rule: `data_offset = ((descriptor_offset + 12 * n) rounded down to 16) + 16`. It fits the first data block of the three GT1G samples and predicted 0x11C0 for `res_grp`, which was then observed as the actual `GT1G` start (E-0017). It does not hold for every nested container: `res_grp` entries 6-10, 13, 15, 16 and 20 differ by 0x10 or -0x10 (E-0020, E-0022), so treat the rule as a property of the tested entry 0 samples rather than a global invariant. The data table is authoritative; the rule only predicts where the first block usually starts.
 
 ## 8. Other Payload Observations
 
@@ -133,6 +148,7 @@ The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0
 
 - `LS11` is a sub-container or compressed-stream tag. Test: capture a longer excerpt and look for repeating structure.
 - `_N1G` is a paletted or compressed image container: entropy is 3.54 and the first bytes after the header form an alpha ramp. Test: compare against public Koei `N1G` documentation and look for a width/height pair in the header.
+- `LWC` blocks hold terrain or map cells: in the four multi-block containers there is exactly one descriptor record per block. Test: correlate `x, y, w, h` with the block header values.
 - The 4-byte gap after each payload is the constant 0x89ABCDEF used as a terminator or integrity marker. Test: read the gap after every entry in every file.
 - The three non-empty entries of `res_shader.bin` hold compiled Direct3D 9 shaders. Test: parse the leading tokens of each payload.
 
@@ -142,6 +158,7 @@ The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0
 - Which `res_grp` entry-0 record reaches x + w = 1,280?
 - What are the 16 bytes between descriptor end and data start?
 - What do the `_N1G` header fields at `+0x0C`, `+0x18`, `+0x1C` and the table at `+0x20` describe?
+- What do the `LWC` block header bytes after the tag describe, and how do the descriptor records map to the blocks?
 
 ## 11. Changelog
 
@@ -153,3 +170,4 @@ The `res_shader` bytes match the Direct3D 9 shader token layout: version token 0
 | 2026-10-12 | Statistics for three nested containers, texture index evidence, second sentinel, GT1G split into gt1g.md | E-0016..E-0019 |
 | 2026-11-10 | Parser and validator rewritten to this layout; all six containers pass; data-start rule limited to the tested samples | E-0020 |
 | 2026-11-10 | Recognized the `_N1G` payload in `res_grp` entry 1; the other 20 entries are nested `LINK` | E-0021 |
+| 2026-11-10 | Corrected +0x04 to `data_entry_count`; decoded multi-block LWC containers in `res_grp` entries 15, 16, 17 and 20 | E-0022 |

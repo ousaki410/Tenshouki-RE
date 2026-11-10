@@ -15,15 +15,15 @@
  * A payload may itself be a nested LINK container:
  *
  *   +0x00  char[4]  "LINK"
- *   +0x04  u32      version            1
+ *   +0x04  u32      data_entry_count   number of data table entries
  *   +0x08  u32      data_table_offset  0x20
  *   +0x0C  u32      record_count       number of 12-byte descriptor records
  *   +0x10  u32      descriptor_offset  0x40
- *   +0x20  u32 x2   data_offset, data_size (one table entry)
+ *   +0x20  u32 x2   data_offset, data_size (repeated data_entry_count times)
  *
  * Descriptor records are { u16 x, y, w, h; u32 texture_index }, all offsets
- * relative to the nested container start. The data section is usually a GT1G
- * texture block (see docs/formats/gt1g.md).
+ * relative to the nested container start. Each data block is either a GT1G
+ * texture block (docs/formats/gt1g.md) or an LWC block (docs/formats/lwc.md).
  */
 
 #pragma once
@@ -77,16 +77,22 @@ struct Gt1gInfo {
     std::vector<Gt1gTexture> textures;
 };
 
+/// One {offset, size} pair in a nested LINK data table
+struct NestedDataEntry {
+    uint32_t offset = 0;     // relative to the nested LINK start
+    uint32_t size = 0;       // bytes
+    std::string signature;   // sniffed magic, e.g. "GT1G", "LWC"
+};
+
 /// Decoded nested LINK container
 struct NestedLinkInfo {
-    uint32_t version = 0;
-    uint32_t data_table_offset = 0;
-    uint32_t record_count = 0;
-    uint32_t descriptor_offset = 0;
-    uint32_t data_offset = 0;
-    uint32_t data_size = 0;
+    uint32_t data_entry_count = 0;   // +0x04; entries in the data table
+    uint32_t data_table_offset = 0;  // +0x08; always 0x20 so far
+    uint32_t record_count = 0;       // +0x0C; descriptor records
+    uint32_t descriptor_offset = 0;  // +0x10
+    std::vector<NestedDataEntry> data_entries;
     std::vector<LinkRecord> records;
-    std::optional<Gt1gInfo> textures;  // present when the data section is GT1G
+    std::optional<Gt1gInfo> textures;  // present when a data block is GT1G
 };
 
 /// A single payload entry in a .bin container
@@ -325,6 +331,8 @@ public:
     static constexpr size_t NESTED_DATA_TABLE_OFFSET = 0x20;
     static constexpr size_t NESTED_DESCRIPTOR_OFFSET = 0x40;
     static constexpr size_t NESTED_RECORD_SIZE = 12;
+    static constexpr uint32_t MAX_NESTED_DATA_ENTRIES = 1000000;
+    static constexpr uint32_t MAX_NESTED_RECORDS = 1000000;
 
     // GT1G layout
     static constexpr size_t GT1G_FIXED_HEADER_SIZE = 0x1C;

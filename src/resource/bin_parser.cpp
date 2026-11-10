@@ -253,6 +253,7 @@ std::string BinArchive::sniff_signature(std::span<const uint8_t> data) {
         if (starts_with(data, "LINK")) return "LINK";
         if (starts_with(data, "GT1G")) return "GT1G";
         if (starts_with(data, "_N1G")) return "N1G";
+        if (starts_with(data, "LWC")) return "LWC";
         if (starts_with(data, "LS11")) return "LS11";
         if (starts_with(data, "DBUG")) return "DBUG";
         if (starts_with(data, "DXBC")) return "DXBC";
@@ -305,45 +306,68 @@ BinResult<NestedLinkInfo> BinArchive::parse_nested(const BinFileEntry& entry) co
     }
 
     NestedLinkInfo info;
-    info.version = read_u32_le(payload, 0x04);
+    info.data_entry_count = read_u32_le(payload, 0x04);
     info.data_table_offset = read_u32_le(payload, 0x08);
     info.record_count = read_u32_le(payload, 0x0C);
     info.descriptor_offset = read_u32_le(payload, 0x10);
 
-    if (info.version != SUPPORTED_VERSION) {
-        // Some res_grp entries carry other values here; only the three GT1G
-        // samples have version 1 (docs/formats/link.md, E-0020).
-        LOG_DEBUG("Nested LINK '{}' has version field {}", entry.name, info.version);
+    // Data table: data_entry_count * { offset relative to nested start, size }
+    uint64_t data_table_end = static_cast<uint64_t>(info.data_table_offset) +
+                              8ull * info.data_entry_count;
+    if (info.data_entry_count == 0 || info.data_entry_count > MAX_NESTED_DATA_ENTRIES ||
+        info.data_table_offset < NESTED_DATA_TABLE_OFFSET ||
+        data_table_end > payload.size()) {
+        LOG_ERROR("Nested LINK '{}' data table ({} entries at 0x{:X}) is out of bounds",
+                  entry.name, info.data_entry_count, info.data_table_offset);
+        return BinResult<NestedLinkInfo>::failure(BinParseError::CorruptedNestedTable);
     }
-    if (info.data_table_offset + 8 > payload.size()) {
-        LOG_ERROR("Nested LINK '{}' data table at 0x{:X} is out of bounds",
-                  entry.name, info.data_table_offset);
+    if (data_table_end > info.descriptor_offset) {
+        LOG_ERROR("Nested LINK '{}' data table ends at 0x{:X}, past descriptor table 0x{:X}",
+                  entry.name, data_table_end, info.descriptor_offset);
         return BinResult<NestedLinkInfo>::failure(BinParseError::CorruptedNestedTable);
     }
 
-    info.data_offset = read_u32_le(payload, info.data_table_offset);
-    info.data_size = read_u32_le(payload, info.data_table_offset + 4);
-
-    if (static_cast<uint64_t>(info.data_offset) + info.data_size > payload.size()) {
-        LOG_ERROR("Nested LINK '{}' data block [0x{:X}, 0x{:X}) exceeds payload of {} bytes",
-                  entry.name, info.data_offset, info.data_offset + info.data_size, payload.size());
-        return BinResult<NestedLinkInfo>::failure(BinParseError::CorruptedNestedTable);
-    }
-
-    // Descriptor table must fit before the data block
+    // Descriptor table
     uint64_t descriptor_bytes = static_cast<uint64_t>(info.record_count) * NESTED_RECORD_SIZE;
     uint64_t descriptor_end = static_cast<uint64_t>(info.descriptor_offset) + descriptor_bytes;
-    if (info.descriptor_offset < NESTED_DATA_TABLE_OFFSET || descriptor_end > info.data_offset) {
-        LOG_ERROR("Nested LINK '{}' descriptor table [0x{:X}, 0x{:X}) does not fit before data at 0x{:X}",
-                  entry.name, info.descriptor_offset, descriptor_end, info.data_offset);
+    if (info.record_count > MAX_NESTED_RECORDS ||
+        info.descriptor_offset < NESTED_DATA_TABLE_OFFSET ||
+        descriptor_end > payload.size()) {
+        LOG_ERROR("Nested LINK '{}' descriptor table [0x{:X}, 0x{:X}) is out of bounds",
+                  entry.name, info.descriptor_offset, descriptor_end);
         return BinResult<NestedLinkInfo>::failure(BinParseError::CorruptedNestedTable);
+    }
+
+    info.data_entries.reserve(info.data_entry_count);
+    for (uint32_t i = 0; i < info.data_entry_count; ++i) {
+        size_t pos = info.data_table_offset + static_cast<size_t>(i) * 8;
+        NestedDataEntry block;
+        block.offset = read_u32_le(payload, pos);
+        block.size = read_u32_le(payload, pos + 4);
+
+        const uint64_t block_end = static_cast<uint64_t>(block.offset) + block.size;
+        if (block_end > payload.size()) {
+            LOG_ERROR("Nested LINK '{}' data block {} [0x{:X}, 0x{:X}) exceeds payload of {} bytes",
+                      entry.name, i, block.offset, block_end, payload.size());
+            return BinResult<NestedLinkInfo>::failure(BinParseError::CorruptedNestedTable);
+        }
+        if (block.offset < descriptor_end) {
+            LOG_WARN("Nested LINK '{}' data block {} at 0x{:X} overlaps the descriptor table (ends 0x{:X})",
+                     entry.name, i, block.offset, descriptor_end);
+        }
+
+        size_t probe = std::min<size_t>(block.size, 16);
+        block.signature = sniff_signature(payload.subspan(block.offset, probe));
+        info.data_entries.push_back(std::move(block));
     }
 
     // Documented data-start rule; a mismatch is informational only
-    uint64_t predicted_data = align_down_16(descriptor_end) + 16;
-    if (predicted_data != info.data_offset) {
-        LOG_DEBUG("Nested LINK '{}' data offset 0x{:X} differs from predicted 0x{:X}",
-                  entry.name, info.data_offset, predicted_data);
+    if (!info.data_entries.empty()) {
+        uint64_t predicted_data = align_down_16(descriptor_end) + 16;
+        if (predicted_data != info.data_entries.front().offset) {
+            LOG_DEBUG("Nested LINK '{}' first data offset 0x{:X} differs from predicted 0x{:X}",
+                      entry.name, info.data_entries.front().offset, predicted_data);
+        }
     }
 
     info.records.reserve(info.record_count);
@@ -358,10 +382,11 @@ BinResult<NestedLinkInfo> BinArchive::parse_nested(const BinFileEntry& entry) co
         info.records.push_back(record);
     }
 
-    // Optional GT1G texture block
-    auto block = payload.subspan(info.data_offset, info.data_size);
-    if (starts_with(block, "GT1G")) {
-        auto gt1g_result = parse_gt1g(block);
+    // Optional GT1G texture block among the data entries
+    for (const auto& block : info.data_entries) {
+        if (block.signature != "GT1G") continue;
+
+        auto gt1g_result = parse_gt1g(payload.subspan(block.offset, block.size));
         if (!gt1g_result) {
             return BinResult<NestedLinkInfo>::failure(gt1g_result.error());
         }
@@ -374,10 +399,11 @@ BinResult<NestedLinkInfo> BinArchive::parse_nested(const BinFileEntry& entry) co
                 break;
             }
         }
+        break;
     }
 
-    LOG_DEBUG("Nested LINK '{}': {} records, data at 0x{:X} ({} bytes)",
-              entry.name, info.record_count, info.data_offset, info.data_size);
+    LOG_DEBUG("Nested LINK '{}': {} data blocks, {} records",
+              entry.name, info.data_entry_count, info.record_count);
     return BinResult<NestedLinkInfo>::success(std::move(info));
 }
 
@@ -554,6 +580,7 @@ std::string BinFileEntry::guess_extension() const {
     if (signature == "LINK")  return ".link";
     if (signature == "GT1G")  return ".gt1g";
     if (signature == "N1G")   return ".n1g";
+    if (signature == "LWC")   return ".lwc";
     if (signature == "LS11")  return ".ls11";
     if (signature == "DDS")   return ".dds";
     if (signature == "DBUG" || signature == "DXBC") return ".shader";

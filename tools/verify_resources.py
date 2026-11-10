@@ -30,7 +30,8 @@ GT1G_TEXTURE_HEADER_SIZE = 20
 
 SIGNATURES = [
     (b"DDS ", "dds"), (b"\x89PNG", "png"), (b"BM", "bmp"), (b"RIFF", "riff/wav"),
-    (b"OggS", "ogg"), (b"LINK", "link"), (b"GT1G", "gt1g"), (b"_N1G", "n1g"), (b"LS11", "ls11"),
+    (b"OggS", "ogg"), (b"LINK", "link"), (b"GT1G", "gt1g"), (b"_N1G", "n1g"),
+    (b"LWC", "lwc"), (b"LS11", "ls11"),
     (b"DBUG", "dxbc-debug"), (b"DXBC", "dxbc"),
     (b"\x78\x9c", "zlib"), (b"\x78\x01", "zlib"),
     (b"\x78\xda", "zlib"), (b"\x1f\x8b", "gzip"), (b"MZ", "pe"), (b"\x7fELF", "elf"),
@@ -117,16 +118,33 @@ def parse_nested(payload):
     if len(payload) < NESTED_DATA_TABLE_OFFSET + 8 or not payload.startswith(b"LINK"):
         raise ValueError("payload is not a nested LINK container")
 
-    version, data_table_offset, record_count, descriptor_offset = struct.unpack_from("<IIII", payload, 0x04)
-    if data_table_offset + 8 > len(payload):
-        raise ValueError(f"data table at 0x{data_table_offset:X} out of bounds")
-    data_offset, data_size = struct.unpack_from("<II", payload, data_table_offset)
-    if data_offset + data_size > len(payload):
-        raise ValueError(f"data block [0x{data_offset:X}, 0x{data_offset + data_size:X}) exceeds payload")
+    data_entry_count, data_table_offset, record_count, descriptor_offset = \
+        struct.unpack_from("<IIII", payload, 0x04)
+
+    data_table_end = data_table_offset + 8 * data_entry_count
+    if data_entry_count == 0 or data_table_offset < NESTED_DATA_TABLE_OFFSET or data_table_end > len(payload):
+        raise ValueError(f"data table ({data_entry_count} entries at 0x{data_table_offset:X}) out of bounds")
+    if data_table_end > descriptor_offset:
+        raise ValueError("data table overlaps the descriptor table")
 
     descriptor_end = descriptor_offset + record_count * NESTED_RECORD_SIZE
-    if descriptor_offset < NESTED_DATA_TABLE_OFFSET or descriptor_end > data_offset:
-        raise ValueError("descriptor table does not fit before the data block")
+    if descriptor_offset < NESTED_DATA_TABLE_OFFSET or descriptor_end > len(payload):
+        raise ValueError("descriptor table out of bounds")
+
+    warnings = []
+    data_entries = []
+    for i in range(data_entry_count):
+        offset, size = struct.unpack_from("<II", payload, data_table_offset + i * 8)
+        if offset + size > len(payload):
+            raise ValueError(
+                f"data block {i} [0x{offset:X}, 0x{offset + size:X}) exceeds payload")
+        if offset < descriptor_end:
+            warnings.append(f"data block {i} at 0x{offset:X} overlaps the descriptor table")
+        data_entries.append({
+            "offset": offset,
+            "size": size,
+            "signature": sniff(payload[offset:offset + 16]),
+        })
 
     predicted = ((descriptor_end) & ~0xF) + 16
     records = []
@@ -136,24 +154,29 @@ def parse_nested(payload):
         records.append({"x": x, "y": y, "w": w, "h": h, "texture_index": tex})
 
     info = {
-        "version": version,
+        "data_entry_count": data_entry_count,
+        "data_table_offset": data_table_offset,
         "record_count": record_count,
         "descriptor_offset": descriptor_offset,
         "descriptor_end": descriptor_end,
         "predicted_data_offset": predicted,
-        "data_offset": data_offset,
-        "data_size": data_size,
+        "data_entries": data_entries,
         "records": records,
     }
+    if warnings:
+        info["warnings"] = warnings
 
-    block = payload[data_offset:data_offset + data_size]
-    if block.startswith(b"GT1G"):
+    for entry in data_entries:
+        if entry["signature"] != "gt1g":
+            continue
+        block = payload[entry["offset"]:entry["offset"] + entry["size"]]
         info["gt1g"] = parse_gt1g(block)
         for rec in records:
             if rec["texture_index"] >= info["gt1g"]["texture_count"]:
                 info.setdefault("warnings", []).append(
                     f"record references texture {rec['texture_index']} but only "
                     f"{info['gt1g']['texture_count']} exist")
+        break
     return info
 
 
@@ -239,15 +262,15 @@ def verify_one(path, manifest=None, strict=False):
         try:
             nested = parse_nested(data[e["offset"]:e["offset"] + e["size"]])
             e["nested"] = {
-                "version": nested["version"],
+                "data_entry_count": nested["data_entry_count"],
+                "data_signatures": sorted({b["signature"] for b in nested["data_entries"]}),
                 "record_count": nested["record_count"],
-                "data_offset": nested["data_offset"],
-                "data_size": nested["data_size"],
                 "texture_count": nested.get("gt1g", {}).get("texture_count"),
             }
-            if nested["predicted_data_offset"] != nested["data_offset"]:
+            first_data = nested["data_entries"][0]["offset"]
+            if nested["predicted_data_offset"] != first_data:
                 warnings.append(
-                    f"entry {e['index']}: data offset 0x{nested['data_offset']:X} != "
+                    f"entry {e['index']}: first data offset 0x{first_data:X} != "
                     f"predicted 0x{nested['predicted_data_offset']:X}")
             warnings.extend(f"entry {e['index']}: {w}" for w in nested.get("warnings", []))
         except ValueError as exc:
