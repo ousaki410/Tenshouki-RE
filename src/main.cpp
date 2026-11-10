@@ -458,6 +458,14 @@ private:
                 if (ImGui::MenuItem("Open Data Root...")) {
                     // TODO: file selection dialog
                 }
+                if (ImGui::MenuItem("Capture Screenshot")) {
+                    auto out_path = std::filesystem::path("screenshot.bmp");
+                    if (renderer_->capture_screenshot(out_path)) {
+                        LOG_INFO("Screenshot saved: {}", out_path.string());
+                    } else {
+                        LOG_WARN("Failed to save screenshot: {}", out_path.string());
+                    }
+                }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Quit", "Esc")) {
                     platform_->request_quit();

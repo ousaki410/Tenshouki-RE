@@ -285,6 +285,9 @@ public:
         const PipelineCreateInfo& get_info() const { return info_; }
         std::shared_ptr<Shader> get_shader() const { return shader_; }
 
+        /// Whether this pipeline has an attached shader program
+        bool has_shader() const { return shader_ != nullptr; }
+
     private:
         PipelineCreateInfo info_;
         std::shared_ptr<Shader> shader_;
@@ -423,6 +426,12 @@ public:
     void bind_index_buffer(std::shared_ptr<Buffer> buffer, uint32_t offset = 0);
     void bind_texture(uint32_t slot, std::shared_ptr<Texture> texture);
     void bind_uniform_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset = 0, uint32_t size = 0);
+
+    // Set shader uniforms (operates on currently bound program)
+    void set_uniform_int(GLint location, int value);
+    void set_uniform_float(GLint location, float value);
+    void set_uniform_vec4(GLint location, const glm::vec4& value);
+    void set_uniform_mat4(GLint location, const glm::mat4& value);
 
     // Draw
     void draw(const DrawCall& call);

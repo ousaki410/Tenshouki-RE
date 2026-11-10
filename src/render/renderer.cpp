@@ -269,16 +269,41 @@ std::shared_ptr<Renderer::Shader> Renderer::create_shader_from_glsl(
 }
 
 void Renderer::bind_pipeline(std::shared_ptr<Pipeline> pipeline) {
-    if (!pipeline) return;
+    if (!pipeline) {
+        LOG_WARN("bind_pipeline: null pipeline");
+        return;
+    }
     auto shader = pipeline->get_shader();
     if (shader) {
         glUseProgram(shader->get_id());
         impl_->current_program_ = shader->get_id();
-    } else if (impl_->blit_program_) {
-        glUseProgram(impl_->blit_program_);
-        impl_->current_program_ = impl_->blit_program_;
+        impl_->stats_.pipeline_binds++;
+    } else {
+        // No shader attached to pipeline: unbind any program and warn
+        LOG_WARN("bind_pipeline: pipeline has no shader attached");
+        glUseProgram(0);
+        impl_->current_program_ = 0;
     }
-    impl_->stats_.pipeline_binds++;
+}
+
+void Renderer::set_uniform_int(GLint location, int value) {
+    if (location < 0) return;
+    glUniform1i(location, value);
+}
+
+void Renderer::set_uniform_float(GLint location, float value) {
+    if (location < 0) return;
+    glUniform1f(location, value);
+}
+
+void Renderer::set_uniform_vec4(GLint location, const glm::vec4& value) {
+    if (location < 0) return;
+    glUniform4fv(location, 1, glm::value_ptr(value));
+}
+
+void Renderer::set_uniform_mat4(GLint location, const glm::mat4& value) {
+    if (location < 0) return;
+    glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(value));
 }
 
 void Renderer::bind_vertex_buffer(uint32_t slot, std::shared_ptr<Buffer> buffer, uint32_t offset) {
