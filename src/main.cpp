@@ -842,16 +842,73 @@ private:
             return;
         }
 
+        // Lazily create VAO/VBO for the officer card quad
+        if (officer_card_vao_ == 0) {
+            float vertices[] = {
+                // pos        uv
+                -0.5f, -0.5f, 0.0f, 0.0f,
+                 0.5f, -0.5f, 1.0f, 0.0f,
+                 0.5f,  0.5f, 1.0f, 1.0f,
+                -0.5f,  0.5f, 0.0f, 1.0f,
+            };
+            glGenVertexArrays(1, &officer_card_vao_);
+            glGenBuffers(1, &officer_card_vbo_);
+            glBindVertexArray(officer_card_vao_);
+            glBindBuffer(GL_ARRAY_BUFFER, officer_card_vbo_);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+            glEnableVertexAttribArray(2);
+            glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                                  (void*)(2 * sizeof(float)));
+            glBindVertexArray(0);
+        }
+
+        // Bind compiled shader pipeline if available
+        if (compiled_shader_ && !officer_card_pipeline_) {
+            officer_card_pipeline_ = renderer_->create_pipeline({});
+            officer_card_pipeline_->set_shader(compiled_shader_);
+        }
+
         if (selected_officer_ >= 0 &&
             static_cast<size_t>(selected_officer_) < sndata_loaded_.officer_count()) {
             const auto& officer = sndata_loaded_.officers[selected_officer_];
 
-            // Display portrait texture (from res_grp.bin entry 0 GT1G)
-            ImVec2 uv0(0, 1);
-            ImVec2 uv1(1, 0);
-            ImVec2 size(256.0f, 256.0f);
-            ImGui::Image(static_cast<ImTextureID>(officer_portrait_->get_id()), size, uv0, uv1,
-                         ImVec4(1, 1, 1, 1), ImVec4(0, 0, 0, 0));
+            if (officer_card_pipeline_ && compiled_shader_) {
+                // Draw portrait using the compiled shader pipeline
+                GLuint program = compiled_shader_->get_id();
+                glUseProgram(program);
+
+                // Identity projection (NDC coordinates)
+                GLint proj_loc = glGetUniformLocation(program, "u_projection");
+                if (proj_loc >= 0) {
+                    float proj[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+                    glUniformMatrix4fv(proj_loc, 1, GL_FALSE, proj);
+                }
+
+                // Bind texture to unit 0
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(officer_portrait_->get_target(),
+                              officer_portrait_->get_id());
+                GLint tex_loc = glGetUniformLocation(program, "u_texture0");
+                if (tex_loc >= 0) {
+                    glUniform1i(tex_loc, 0);
+                }
+
+                // Draw quad
+                glBindVertexArray(officer_card_vao_);
+                glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+                glBindVertexArray(0);
+
+                ImGui::Text("Portrait rendered via compiled shader pipeline");
+            } else {
+                // Fallback to ImGui Image
+                ImVec2 uv0(0, 1);
+                ImVec2 uv1(1, 0);
+                ImVec2 size(256.0f, 256.0f);
+                ImGui::Image(static_cast<ImTextureID>(officer_portrait_->get_id()), size, uv0, uv1,
+                             ImVec4(1, 1, 1, 1), ImVec4(0, 0, 0, 0));
+            }
             ImGui::SameLine();
 
             // Officer info
@@ -1207,6 +1264,11 @@ void main() {
     std::unique_ptr<BinArchive> grp_archive_;
     std::shared_ptr<Renderer::Texture> officer_portrait_;
     int portrait_texture_index_ = 0;
+
+    // Officer Card rendering pipeline (bound to compiled_shader_ when available)
+    std::shared_ptr<Renderer::Pipeline> officer_card_pipeline_;
+    GLuint officer_card_vao_ = 0;
+    GLuint officer_card_vbo_ = 0;
 };
 
 } // namespace tensyoki
