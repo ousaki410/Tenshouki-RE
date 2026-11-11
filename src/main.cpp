@@ -84,6 +84,13 @@ public:
             return ok ? 0 : 1;
         }
 
+        // Headless strategy layer test: no window, no renderer
+        if (strategy_test_) {
+            const bool ok = run_strategy_test();
+            Logging::shutdown();
+            return ok ? 0 : 1;
+        }
+
         if (help_requested_) {
             Logging::shutdown();
             return 0;
@@ -271,6 +278,15 @@ private:
         game_ctx_.sndata = std::make_unique<SndataArchive>(std::move(sndata_loaded_));
         game_ctx_.tex_cache = &texture_cache_;  // not owned
 
+        // Save system defaults to ./saves unless configured otherwise.
+        game_ctx_.save_system.init(game_ctx_.save_dir);
+
+        // Prepare campaign data so a new game or load can start immediately.
+        if (game_ctx_.sndata) {
+            game_ctx_.castle_command.init(*game_ctx_.sndata);
+            game_ctx_.strategy.init(game_ctx_.castle_command);
+        }
+
         // Push main menu state
         game_state_mgr_.push(std::make_unique<MainMenuState>(game_ctx_));
 
@@ -294,6 +310,8 @@ private:
                 save_test_ = true;
             } else if (arg == "--test-officer") {
                 officer_test_ = true;
+            } else if (arg == "--test-strategy") {
+                strategy_test_ = true;
             } else if (arg == "--help" || arg == "-h") {
                 std::cout << "Usage: tensyoki [options] [data_root]\n"
                           << "  --check-resources  parse all res/*.bin containers and exit\n"
@@ -301,6 +319,7 @@ private:
                           << "  --test-castle      run headless castle command test and exit\n"
                           << "  --test-save        run headless save/load system test and exit\n"
                           << "  --test-officer     run headless officer system test and exit\n"
+                          << "  --test-strategy    run headless turn-based strategy test and exit\n"
                           << "  --help             show this message\n"
                           << "Environment: TENSYOKI_DATA_ROOT\n";
                 help_requested_ = true;
@@ -1579,6 +1598,336 @@ private:
         return failures == 0;
     }
 
+    /// Headless turn-based strategy test: ownership, economy, AI turn,
+    /// abstract attacks, seasons, victory/defeat and save round-trip.
+    /// Returns true if all checks pass.
+    bool run_strategy_test() {
+        LOG_INFO("=== Strategy Layer Test ===");
+
+        int failures = 0;
+        auto check = [&](bool cond, const std::string& desc) {
+            if (cond) {
+                LOG_INFO("  PASS: {}", desc);
+            } else {
+                LOG_ERROR("  FAIL: {}", desc);
+                ++failures;
+            }
+        };
+
+        auto has_event = [](const std::vector<StrategyEvent>& events,
+                            StrategyEventType type) {
+            for (const auto& event : events) {
+                if (event.type == type) return true;
+            }
+            return false;
+        };
+
+        // ---- Default ownership mapping ----
+        LOG_INFO("--- Ownership Mapping ---");
+        check(default_owner_for_region(4) == 1,
+              "player faction owns region 4");
+        check(default_owner_for_region(0) == 2,
+              "region 0 belongs to faction 2");
+        check(default_owner_for_region(7) == 8,
+              "region 7 belongs to faction 8");
+        check(default_region_for_owner(1) == 4,
+              "inverse mapping: player -> region 4");
+        check(default_region_for_owner(8) == 7,
+              "inverse mapping: faction 8 -> region 7");
+
+        // ---- Faction initialization ----
+        LOG_INFO("--- Faction Initialization ---");
+        std::vector<CastleData> test_castles;
+        for (uint32_t i = 0; i < 16; ++i) {
+            CastleData c;
+            c.index = i;
+            c.name = "Castle " + std::to_string(i);
+            c.name_utf8 = c.name;
+            c.region_id = i % 8;
+            c.owner_id = default_owner_for_region(c.region_id);
+            c.is_player_owned = (c.owner_id == 1);
+            c.level = 1;
+            c.defense = 10;
+            c.max_defense = 50;
+            c.garrison = 60;
+            c.max_garrison = 100;
+            c.gold = 1000;
+            c.food = 500;
+            c.loyalty = 50;
+            c.tax_rate = 50;
+            c.unrest = 0;
+            c.is_capital = (i < 8);
+            test_castles.push_back(c);
+        }
+
+        CastleCommand cmd;
+        cmd.set_castles_data(test_castles);
+        cmd.set_turn_count(0);
+
+        StrategyManager strategy;
+        strategy.set_seed(12345);
+        strategy.init(cmd);
+
+        check(strategy.factions().size() == 8, "8 factions created");
+        const Faction* player = strategy.faction(1);
+        check(player != nullptr && player->is_player, "faction 1 is the player");
+        check(player != nullptr && player->name == "Oda", "player faction is Oda");
+        check(strategy.faction_name(2) == "Date", "faction 2 is Date");
+        check(strategy.faction_name(8) == "Shimazu", "faction 8 is Shimazu");
+        check(cmd.player_castle_count() == 2,
+              "player owns 2 castles (region 4)");
+        check(cmd.get_castle(4)->is_player_owned,
+              "castle 4 is player-owned");
+        check(cmd.get_castle(5)->owner_id == 6,
+              "castle 5 belongs to Mori (faction 6)");
+
+        // ---- Player economy (AI disabled) ----
+        LOG_INFO("--- Player Economy ---");
+        strategy.set_ai_enabled(false);
+        GameDate date{1, 4, 1};  // April, spring
+
+        auto* pc = cmd.get_castle(4);
+        const int32_t gold_before = pc->gold;
+        const int32_t food_before = pc->food;
+
+        strategy.end_player_turn(cmd, date);
+
+        check(date.month == 5, "calendar advances one month");
+        check(cmd.get_turn_count() == 1, "turn counter advances to 1");
+        check(strategy.turn() == 1, "strategy manager turn synced");
+
+        pc = cmd.get_castle(4);
+        check(pc->gold == gold_before + 50,
+              "tax income: +50 gold at 50% tax");
+        check(pc->food == food_before + 44,
+              "spring food: +50 production -6 consumption");
+        check(pc->loyalty == 52,
+              "loyalty: garrison bonus +1, spring +1");
+        check(pc->unrest == 0, "unrest remains zero");
+
+        // ---- AI turn ----
+        LOG_INFO("--- AI Turn ---");
+        strategy.set_ai_enabled(true);
+        const int32_t ai_garrison_before = cmd.get_castle(0)->garrison;
+        strategy.end_player_turn(cmd, date);
+
+        check(date.month == 6, "calendar advances to June");
+        check(cmd.get_turn_count() == 2, "turn counter advances to 2");
+        check(has_event(strategy.events(), StrategyEventType::AiRecruited),
+              "AI faction recruited troops");
+        check(cmd.get_castle(0)->garrison > ai_garrison_before,
+              "AI castle garrison increased");
+        check(has_event(strategy.events(), StrategyEventType::SeasonChanged),
+              "season change event logged when spring -> summer");
+
+        // ---- Season multipliers ----
+        LOG_INFO("--- Season Modifiers ---");
+        check(StrategyManager::season_food_production_multiplier(
+                  Season::Spring) == 1.0f,
+              "spring production multiplier is 1.0");
+        check(StrategyManager::season_food_production_multiplier(
+                  Season::Autumn) == 1.5f,
+              "autumn production multiplier is 1.5");
+        check(StrategyManager::season_food_production_multiplier(
+                  Season::Winter) == 0.5f,
+              "winter production multiplier is 0.5");
+        check(StrategyManager::season_food_consumption_multiplier(
+                  Season::Winter) == 1.5f,
+              "winter consumption multiplier is 1.5");
+
+        CastleData summer;
+        summer.region_id = 4;
+        CastleData winter;
+        winter.region_id = 5;
+        check(StrategyManager::are_adjacent(summer, winter),
+              "neighbouring regions are adjacent");
+        CastleData distant;
+        distant.region_id = 0;
+        check(!StrategyManager::are_adjacent(summer, distant),
+              "distant regions are not adjacent");
+
+        // ---- Abstract attack: capture ----
+        LOG_INFO("--- Abstract Attack: Capture ---");
+        std::vector<CastleData> duel_castles;
+        {
+            CastleData attacker;
+            attacker.index = 0;
+            attacker.name = "AI Base";
+            attacker.name_utf8 = attacker.name;
+            attacker.region_id = 0;
+            attacker.owner_id = 2;
+            attacker.level = 1;
+            attacker.defense = 10;
+            attacker.max_defense = 50;
+            attacker.garrison = 100;
+            attacker.max_garrison = 100;
+            attacker.gold = 500;
+            attacker.food = 500;
+            duel_castles.push_back(attacker);
+
+            CastleData defender;
+            defender.index = 1;
+            defender.name = "Player Keep";
+            defender.name_utf8 = defender.name;
+            defender.region_id = 1;
+            defender.owner_id = 1;
+            defender.is_player_owned = true;
+            defender.level = 1;
+            defender.defense = 10;
+            defender.max_defense = 50;
+            defender.garrison = 5;
+            defender.max_garrison = 100;
+            defender.gold = 400;
+            defender.food = 500;
+            duel_castles.push_back(defender);
+        }
+
+        CastleCommand duel_cmd;
+        duel_cmd.set_castles_data(duel_castles);
+        StrategyManager duel_strategy;
+        duel_strategy.set_seed(777);
+        duel_strategy.init(duel_cmd);
+
+        GameDate duel_date{1, 4, 1};
+        std::vector<StrategyEvent> duel_events;
+        auto* attacker = duel_cmd.get_castle(0);
+        auto* defender = duel_cmd.get_castle(1);
+
+        const bool captured = duel_strategy.resolve_attack(
+            duel_cmd, *attacker, *defender, 2, duel_date, duel_events);
+        check(captured, "overwhelming attack captures the castle");
+        check(defender->owner_id == 2, "captured castle changes owner");
+        check(!defender->is_player_owned,
+              "captured player castle is no longer player-owned");
+        check(attacker->garrison == 50,
+              "attacker loses half its garrison after capture");
+        check(defender->garrison >= 5,
+              "occupying garrison is installed");
+        check(defender->loyalty == 40, "captured castle loyalty reset to 40");
+        check(defender->unrest == 20, "captured castle unrest set to 20");
+        check(has_event(duel_events, StrategyEventType::CastleLost),
+              "player castle loss event logged");
+        check(has_event(duel_events, StrategyEventType::FactionEliminated),
+              "player faction elimination event logged");
+        const Faction* eliminated = duel_strategy.faction(1);
+        check(eliminated != nullptr && !eliminated->alive,
+              "player faction marked as eliminated");
+        duel_strategy.evaluate_end_conditions(duel_cmd);
+        check(duel_strategy.defeat(), "defeat detected with no player castles");
+
+        // ---- Abstract attack: repelled ----
+        LOG_INFO("--- Abstract Attack: Repelled ---");
+        std::vector<CastleData> wall_castles = duel_castles;
+        wall_castles[0].garrison = 5;
+        wall_castles[0].owner_id = 2;
+        wall_castles[1].garrison = 200;
+        wall_castles[1].owner_id = 1;
+        wall_castles[1].is_player_owned = true;
+
+        CastleCommand wall_cmd;
+        wall_cmd.set_castles_data(wall_castles);
+        StrategyManager wall_strategy;
+        wall_strategy.set_seed(999);
+        wall_strategy.init(wall_cmd);
+
+        std::vector<StrategyEvent> wall_events;
+        auto* weak_attacker = wall_cmd.get_castle(0);
+        auto* strong_defender = wall_cmd.get_castle(1);
+        const int32_t weak_before = weak_attacker->garrison;
+
+        const bool captured_2 = wall_strategy.resolve_attack(
+            wall_cmd, *weak_attacker, *strong_defender, 2, duel_date,
+            wall_events);
+        check(!captured_2, "weak attack is repelled");
+        check(strong_defender->owner_id == 1,
+              "defender keeps ownership after repelled attack");
+        check(weak_attacker->garrison < weak_before,
+              "repelled attacker loses troops");
+        check(has_event(wall_events, StrategyEventType::AiAttack),
+              "repelled attack event logged");
+
+        // ---- Victory / defeat evaluation ----
+        LOG_INFO("--- Victory / Defeat ---");
+        std::vector<CastleData> victory_castles = test_castles;
+        for (auto& c : victory_castles) {
+            c.owner_id = 1;
+            c.is_player_owned = true;
+        }
+        CastleCommand victory_cmd;
+        victory_cmd.set_castles_data(victory_castles);
+        StrategyManager victory_strategy;
+        victory_strategy.init(victory_cmd);
+        check(victory_strategy.victory(),
+              "victory when every castle is player-owned");
+
+        for (auto& c : victory_castles) {
+            c.owner_id = 2;
+            c.is_player_owned = false;
+        }
+        victory_cmd.set_castles_data(victory_castles);
+        victory_strategy.rebuild(victory_cmd);
+        check(victory_strategy.defeat(),
+              "defeat when no castle is player-owned");
+        check(!victory_strategy.victory(),
+              "victory flag cleared after losing everything");
+
+        // ---- Save/load round-trip: ownership and turn ----
+        LOG_INFO("--- Save/Load Round-Trip ---");
+        const std::string test_dir = "/tmp/tensyoki_strategy_test";
+        SaveSystem save_system;
+        save_system.init(test_dir);
+
+        GameSaveData save_data;
+        save_data.save_name = "Strategy Test";
+        save_data.turn_count = 9;
+        save_data.date_year = 2;
+        save_data.date_month = 7;
+        save_data.date_day = 1;
+        save_data.castles = cmd.castles();
+        save_data.player_castle_count = cmd.player_castle_count();
+        save_data.total_castles =
+            static_cast<int32_t>(cmd.castles().size());
+
+        check(save_system.save(1, save_data), "strategy save succeeds");
+
+        GameSaveData loaded;
+        check(save_system.load(1, loaded), "strategy load succeeds");
+        check(loaded.version == 2, "save format version is 2");
+        check(loaded.turn_count == 9, "turn count round-trips");
+        check(loaded.castles.size() == cmd.castles().size(),
+              "castle count round-trips");
+        check(loaded.castles[0].owner_id == 2,
+              "castle owner id round-trips");
+        check(loaded.castles[4].owner_id == 1,
+              "player castle ownership round-trips");
+
+        CastleCommand loaded_cmd;
+        loaded_cmd.set_castles_data(loaded.castles);
+        loaded_cmd.set_turn_count(loaded.turn_count);
+
+        StrategyManager loaded_strategy;
+        loaded_strategy.rebuild(loaded_cmd, false);
+        check(loaded_strategy.factions().size() == 8,
+              "factions rebuilt from loaded ownership");
+        check(loaded_strategy.faction(1) != nullptr &&
+                  loaded_strategy.faction(1)->alive,
+              "player faction alive after load");
+
+        save_system.delete_save(1);
+        std::error_code ec;
+        std::filesystem::remove_all(test_dir, ec);
+
+        // ---- Summary ----
+        LOG_INFO("=== Strategy Test Summary ===");
+        LOG_INFO("  Failures: {}", failures);
+        if (failures == 0) {
+            LOG_INFO("All strategy tests PASSED");
+        } else {
+            LOG_ERROR("{} strategy test(s) FAILED", failures);
+        }
+        return failures == 0;
+    }
+
     void main_loop() {
         bool running = true;
         uint64_t frame_count = 0;
@@ -2579,6 +2928,7 @@ void main() {
     bool castle_test_ = false;
     bool save_test_ = false;
     bool officer_test_ = false;
+    bool strategy_test_ = false;
     bool help_requested_ = false;
 
     std::unique_ptr<BinArchive> selected_archive_;

@@ -25,6 +25,8 @@
 
 namespace tensyoki {
 
+class StrategyManager;  // forward declaration
+
 /// Castle position and state on the map
 struct CastlePos {
     uint32_t index = 0;
@@ -52,6 +54,8 @@ struct CastlePos {
     bool is_player_owned = false;  // Player controls this castle
     uint32_t owner_id = 0;         // 0 = neutral, 1 = player, 2+ = enemy factions
     bool is_capital = false;       // Capital city (important victory condition)
+    int32_t loyalty = 50;          // Castle loyalty (0-100)
+    int32_t unrest = 0;            // Castle unrest (0-100)
 };
 
 /// Camera for the map
@@ -90,8 +94,11 @@ public:
               Renderer& renderer, const BinArchive* grp_archive = nullptr,
               const CastleCommand* castle_command = nullptr);
 
-    /// Update castle data from castle_command (facilities, garrison, etc.)
+    /// Update castle data from castle_command (facilities, garrison, ownership)
     void update_castle_data(const CastleCommand& cmd);
+
+    /// Attach the strategy manager for faction-name display (not owned)
+    void set_strategy(const StrategyManager* strategy) { strategy_ = strategy; }
 
     /// Update camera/zoom based on input (called each frame)
     void update(float dt, Renderer& renderer);
@@ -169,6 +176,7 @@ public:
     bool request_castle_command = false;
     bool request_castle_detail = false;
     bool request_battle = false;
+    bool request_end_turn = false;
 
     /// Campaign: castle selected for attack (set by UI)
     std::optional<uint32_t> attack_from_castle = std::nullopt;
@@ -179,6 +187,7 @@ public:
         request_castle_command = false;
         request_castle_detail = false;
         request_battle = false;
+        request_end_turn = false;
     }
 
 private:
@@ -235,6 +244,7 @@ private:
     const BinArchive* grp_archive_ = nullptr;
     Renderer* renderer_ = nullptr;
     const CastleCommand* castle_command_ = nullptr;  // for rebellion display
+    const StrategyManager* strategy_ = nullptr;      // for faction names
     // Shared white pixel texture for fallback markers
     std::shared_ptr<Renderer::Texture> white_tex_;
 };

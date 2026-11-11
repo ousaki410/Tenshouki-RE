@@ -29,6 +29,7 @@ private:
     int selected_save_slot_ = 1;
 
     void render_load_menu();
+    void start_new_game();
 };
 
 /// Map view state: strategic layer
@@ -46,7 +47,9 @@ private:
     bool init_done_ = false;
     int selected_officer_ = -1;  // Selected officer from garrison list
     int selected_castle_ = -1;   // Selected castle index for commands
-    int last_month_ = -1;        // Track month for resource production
+
+    // End the player's turn: resolve economy, AI actions and the calendar.
+    void handle_end_turn();
 };
 
 /// Officer detail state: view and edit officer information

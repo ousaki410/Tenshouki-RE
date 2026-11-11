@@ -160,6 +160,7 @@ std::string SaveSystem::serialize(const GameSaveData& data) const {
     ss << "date_month=" << data.date_month << "\n";
     ss << "date_day=" << data.date_day << "\n";
     ss << "save_name=" << data.save_name << "\n";
+    ss << "turn_count=" << data.turn_count << "\n";
     ss << "player_castle_count=" << data.player_castle_count << "\n";
     ss << "total_castles=" << data.total_castles << "\n";
 
@@ -185,6 +186,7 @@ std::string SaveSystem::serialize(const GameSaveData& data) const {
         ss << "castle.lord_name_utf8=" << castle.lord_name_utf8 << "\n";
         ss << "castle.region_id=" << castle.region_id << "\n";
         ss << "castle.is_player_owned=" << (castle.is_player_owned ? 1 : 0) << "\n";
+        ss << "castle.owner_id=" << castle.owner_id << "\n";
         ss << "castle.is_capital=" << (castle.is_capital ? 1 : 0) << "\n";
         ss << "castle.auto_defense_bonus=" << castle.auto_defense_bonus << "\n";
         ss << "castle.loyalty=" << castle.loyalty << "\n";
@@ -218,6 +220,8 @@ bool SaveSystem::deserialize(const std::string& json, GameSaveData& data) const 
                 data.date_day = std::stoi(line.substr(9));
             } else if (line.find("save_name=") == 0) {
                 data.save_name = line.substr(10);
+            } else if (line.find("turn_count=") == 0) {
+                data.turn_count = std::stoi(line.substr(11));
             } else if (line.find("player_castle_count=") == 0) {
                 data.player_castle_count = std::stoi(line.substr(20));
             } else if (line.find("total_castles=") == 0) {
@@ -305,6 +309,11 @@ bool SaveSystem::deserialize(const std::string& json, GameSaveData& data) const 
             } else if (line.find("castle.is_player_owned=") == 0) {
                 if (!data.castles.empty()) {
                     data.castles.back().is_player_owned = (line.substr(23) == "1");
+                }
+            } else if (line.find("castle.owner_id=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().owner_id =
+                        static_cast<uint32_t>(std::stoi(line.substr(16)));
                 }
             } else if (line.find("castle.is_capital=") == 0) {
                 if (!data.castles.empty()) {

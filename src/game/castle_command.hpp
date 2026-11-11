@@ -21,6 +21,22 @@ namespace tensyoki {
 
 class SndataArchive;  // forward declaration
 
+/// Default campaign ownership for a region.
+/// The player faction (1) starts in region 4 (Kansai); the seven remaining
+/// regions are assigned to AI factions 2..8.
+inline uint32_t default_owner_for_region(uint32_t region_id) {
+    region_id %= 8;
+    if (region_id == 4) return 1;
+    return region_id < 4 ? region_id + 2 : region_id + 1;
+}
+
+/// Inverse of default_owner_for_region().
+inline uint32_t default_region_for_owner(uint32_t owner_id) {
+    if (owner_id == 0 || owner_id > 8) return 0;  // Independent / invalid
+    if (owner_id == 1) return 4;
+    return owner_id <= 5 ? owner_id - 2 : owner_id - 1;
+}
+
 /// Castle facility types
 enum class FacilityType {
     None,
@@ -61,6 +77,7 @@ struct CastleData {
     // Region control
     uint32_t region_id = 0;           // Which region this castle belongs to
     bool is_player_owned = false;     // Player controls this castle
+    uint32_t owner_id = 0;            // 0 = independent, 1 = player, 2+ = AI faction
     bool is_capital = false;          // Capital city (victory condition)
     int32_t auto_defense_bonus = 0;   // Auto-defense troops from facilities
 
@@ -151,6 +168,7 @@ public:
 
     // Get all castles
     const std::vector<CastleData>& castles() const { return castles_; }
+    std::vector<CastleData>& castles() { return castles_; }
 
     // Get castles owned by player
     std::vector<uint32_t> get_player_castles() const;
@@ -189,6 +207,9 @@ public:
 
     // Get current turn number
     int32_t get_turn_count() const { return current_turn_; }
+
+    // Restore the turn counter (save/load)
+    void set_turn_count(int32_t turn) { current_turn_ = turn; }
 
     // Advance turn counter
     void advance_turn();

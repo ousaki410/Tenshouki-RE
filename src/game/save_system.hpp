@@ -38,12 +38,15 @@ struct SaveSlotInfo {
 
 /// Complete game state for saving/loading
 struct GameSaveData {
-    int32_t version = 1;  // Save format version
+    int32_t version = 2;  // Save format version (2 adds owner_id/turn_count)
 
     // Game date
     int32_t date_year = 1;
     int32_t date_month = 4;
     int32_t date_day = 1;
+
+    // Campaign turn counter
+    int32_t turn_count = 0;
 
     // Castle data
     std::vector<CastleData> castles;

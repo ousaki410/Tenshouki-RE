@@ -60,8 +60,7 @@ void MainMenuState::render() {
         if (ImGui::Selectable(items[i], selected)) {
             selected_item_ = i;
             if (i == 0) {
-                ctx_.date = GameDate{1, 4, 1};
-                ctx_.pending_push = GameContext::PendingState::MapView;
+                start_new_game();
             } else if (i == 1) {
                 show_load_menu_ = true;
             } else if (i == 2) {
@@ -83,8 +82,7 @@ void MainMenuState::render() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
         if (selected_item_ == 0) {
-            ctx_.date = GameDate{1, 4, 1};
-            ctx_.pending_push = GameContext::PendingState::MapView;
+            start_new_game();
         } else if (selected_item_ == 1) {
             show_load_menu_ = true;
         } else if (selected_item_ == 2) {
@@ -122,7 +120,13 @@ void MainMenuState::render_load_menu() {
                 // Load game state
                 ctx_.date = GameDate{save_data.date_year, save_data.date_month,
                                      save_data.date_day};
+                ctx_.clock.paused = true;
                 ctx_.castle_command.set_castles_data(save_data.castles);
+                ctx_.castle_command.set_turn_count(save_data.turn_count);
+                // Version 1 saves have no owner_id; assign default factions.
+                ctx_.strategy.rebuild(ctx_.castle_command,
+                                      save_data.version < 2);
+                ctx_.strategy.clear_events();  // Do not carry over an old log
                 ctx_.pending_push = GameContext::PendingState::MapView;
                 show_load_menu_ = false;
                 LOG_INFO("MainMenuState: loaded save slot %d",
@@ -146,6 +150,29 @@ void MainMenuState::render_load_menu() {
     }
 }
 
+void MainMenuState::start_new_game() {
+    // Reset the campaign calendar and clock.
+    ctx_.date = GameDate{1, 4, 1};  // April, year 1 (spring)
+    ctx_.clock = GameClock{};
+    ctx_.clock.paused = true;
+
+    // Rebuild castle ownership from the scenario data.
+    if (ctx_.sndata) {
+        ctx_.castle_command.init(*ctx_.sndata);
+    }
+    ctx_.castle_command.set_turn_count(0);
+    ctx_.strategy.reset(ctx_.castle_command);
+
+    ctx_.selected_castle_id = 0;
+    ctx_.battle_target_castle.reset();
+    ctx_.battle_result.reset();
+    ctx_.pending_push = GameContext::PendingState::MapView;
+
+    LOG_INFO("MainMenuState: new campaign started ({} castles, {} factions)",
+             ctx_.castle_command.castles().size(),
+             ctx_.strategy.factions().size());
+}
+
 // ===========================================================================
 // MapViewState
 // ===========================================================================
@@ -156,25 +183,30 @@ void MapViewState::enter() {
     LOG_INFO("MapViewState: enter");
     init_done_ = false;
     selected_officer_ = -1;
-    last_month_ = ctx_.date.month;
+
+    // Campaign turns are resolved explicitly via "End Turn"; keep the
+    // optional real-time clock paused.
+    ctx_.clock.paused = true;
+
+    if (ctx_.sndata && !ctx_.strategy.initialized()) {
+        ctx_.strategy.init(ctx_.castle_command);
+    }
 }
 
 bool MapViewState::update(float dt) {
     map_view_.update(dt, *ctx_.renderer);
 
-    // Sync castle data from castle_command (facilities, garrison, etc.)
+    // Sync castle data from castle_command (facilities, garrison, ownership)
     if (ctx_.sndata) {
         map_view_.update_castle_data(ctx_.castle_command);
     }
 
-    // Process monthly resource production when month changes
-    if (ctx_.sndata && ctx_.date.month != last_month_) {
-        last_month_ = ctx_.date.month;
-        ctx_.castle_command.process_monthly_income();
-        ctx_.castle_command.process_auto_recruit();
-        ctx_.castle_command.process_region_control();
-        LOG_INFO("MapViewState: processed monthly income for month %d",
-                 ctx_.date.month);
+    // ---- End Turn: player economy, AI factions, season, calendar ----
+    if (map_view_.request_end_turn) {
+        map_view_.clear_requests();
+        if (ctx_.sndata) {
+            handle_end_turn();
+        }
     }
 
     // Process UI request flags from map_view_
@@ -226,6 +258,7 @@ bool MapViewState::update(float dt) {
             // Capture the target castle
             if (target) {
                 target->is_player_owned = true;
+                target->owner_id = StrategyManager::kPlayerFactionId;
                 target->lord_officer_id = 0;  // No lord assigned yet
                 target->lord_name.clear();
                 target->lord_name_utf8.clear();
@@ -250,6 +283,7 @@ bool MapViewState::update(float dt) {
             // If target was player-owned (defensive battle), it may be lost
             if (target && target->is_player_owned) {
                 target->is_player_owned = false;
+                target->owner_id = 0;  // Independent after a lost defense
                 target->lord_officer_id = 0;
                 target->lord_name.clear();
                 target->lord_name_utf8.clear();
@@ -257,7 +291,9 @@ bool MapViewState::update(float dt) {
             }
         }
 
-        // Refresh map view castle data
+        // Rebuild faction bookkeeping and victory/defeat flags after the
+        // ownership change, then refresh the map.
+        ctx_.strategy.rebuild(ctx_.castle_command);
         map_view_.update_castle_data(ctx_.castle_command);
 
         // Clear battle result
@@ -268,11 +304,25 @@ bool MapViewState::update(float dt) {
     return true;
 }
 
+void MapViewState::handle_end_turn() {
+    if (!ctx_.strategy.initialized()) {
+        ctx_.strategy.init(ctx_.castle_command);
+    }
+
+    ctx_.strategy.end_player_turn(ctx_.castle_command, ctx_.date);
+    map_view_.update_castle_data(ctx_.castle_command);
+
+    LOG_INFO("MapViewState: ended turn {} ({})",
+             ctx_.castle_command.get_turn_count(),
+             ctx_.date.to_string().c_str());
+}
+
 void MapViewState::render() {
     if (!init_done_ && ctx_.renderer && ctx_.sndata && ctx_.tex_cache) {
         if (map_view_.init(*ctx_.sndata, *ctx_.tex_cache, *ctx_.renderer,
                            ctx_.grp_archive.get(),
                            &ctx_.castle_command)) {
+            map_view_.set_strategy(&ctx_.strategy);
             init_done_ = true;
             LOG_INFO("MapViewState: map initialized");
         }
@@ -310,15 +360,35 @@ void MapViewState::render() {
 
     // Render castle info panel (date, stats, selected castle summary)
     ImGui::SetNextWindowPos({10, 10}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({340, 420}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({340, 470}, ImGuiCond_Always);
     ImGui::Begin("Map Info", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
     ImGui::Text("Date: %s", ctx_.date.to_string().c_str());
     ImGui::Text("Season: %s", ctx_.date.season_name().c_str());
+    ImGui::Text("Turn: %d", ctx_.castle_command.get_turn_count());
     ImGui::Separator();
     ImGui::Text("Castles: %zu", ctx_.sndata ? ctx_.sndata->castle_count() : 0);
+    ImGui::Text("Player Castles: %d/%zu", ctx_.castle_command.player_castle_count(),
+                ctx_.castle_command.castles().size());
     ImGui::Text("Officers: %zu", ctx_.sndata ? ctx_.sndata->officer_count() : 0);
+    ImGui::Separator();
+
+    if (ctx_.strategy.victory()) {
+        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "VICTORY!");
+    } else if (ctx_.strategy.defeat()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "DEFEAT!");
+    }
+
+    if (ctx_.strategy.game_over()) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("End Turn (Next Month)", {-1, 0})) {
+        map_view_.request_end_turn = true;
+    }
+    if (ctx_.strategy.game_over()) {
+        ImGui::EndDisabled();
+    }
     ImGui::Separator();
 
     auto sel = map_view_.selected_castle();
@@ -376,6 +446,7 @@ void MapViewState::render() {
         save_data.date_year = ctx_.date.year;
         save_data.date_month = ctx_.date.month;
         save_data.date_day = ctx_.date.day;
+        save_data.turn_count = ctx_.castle_command.get_turn_count();
         save_data.castles = ctx_.castle_command.castles();
         save_data.player_castle_count = ctx_.castle_command.player_castle_count();
         save_data.total_castles = static_cast<int32_t>(ctx_.castle_command.castles().size());
@@ -410,6 +481,45 @@ void MapViewState::render() {
         for (size_t i = start; i < rebellion_events.size(); ++i) {
             const auto& evt = rebellion_events[i];
             ImGui::Text("Turn %d: %s revolted!", evt.turn, evt.castle_name.c_str());
+        }
+        ImGui::End();
+    }
+
+    // Strategy log: recent campaign events (AI actions, captures, seasons)
+    const auto& strategy_events = ctx_.strategy.events();
+    if (!strategy_events.empty()) {
+        float panel_h = 190.0f;
+        ImGui::SetNextWindowPos(
+            {10.0f, (float)ctx_.renderer->get_height() - panel_h - 10.0f},
+            ImGuiCond_Always);
+        ImGui::SetNextWindowSize({440, panel_h}, ImGuiCond_Always);
+        ImGui::Begin("Strategy Log", nullptr,
+                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+        const int visible = 8;
+        int start = std::max(0, (int)strategy_events.size() - visible);
+        for (size_t i = static_cast<size_t>(start);
+             i < strategy_events.size(); ++i) {
+            const auto& evt = strategy_events[i];
+            ImVec4 color(0.85f, 0.85f, 0.85f, 1.0f);
+            switch (evt.type) {
+                case StrategyEventType::Victory:
+                    color = ImVec4(0.3f, 1.0f, 0.3f, 1.0f); break;
+                case StrategyEventType::Defeat:
+                case StrategyEventType::CastleLost:
+                    color = ImVec4(1.0f, 0.35f, 0.35f, 1.0f); break;
+                case StrategyEventType::CastleCaptured:
+                case StrategyEventType::FactionEliminated:
+                    color = ImVec4(1.0f, 0.8f, 0.3f, 1.0f); break;
+                case StrategyEventType::SeasonChanged:
+                    color = ImVec4(0.5f, 0.85f, 1.0f, 1.0f); break;
+                case StrategyEventType::Starvation:
+                    color = ImVec4(1.0f, 0.55f, 0.2f, 1.0f); break;
+                default:
+                    break;
+            }
+            ImGui::TextColored(color, "[%d/%02d] %s", evt.year, evt.month,
+                               evt.message.c_str());
         }
         ImGui::End();
     }

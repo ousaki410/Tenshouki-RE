@@ -19,9 +19,28 @@ A native Linux port of *Nobunaga's Ambition: Tenshouki* (信長の野望・天�
 - Data layer: `SndataArchive` parser for scenario/sndata1..6.dat (officers,
   castles, CP932 name decoding); 4 unit tests + real-file integration tests
 
-**Phase 3 (data layer + rendering core) — next** 🔲
-- Officers / castles data layer just completed (see docs/formats/sndata.md)
+**Phase 3 (data layer + rendering core) — complete** ✅
+- Officers / castles data layer (see docs/formats/sndata.md)
 - Renderer core: texture upload from GT1G blocks, sprite rendering, text rendering
+- CJK text rendering via FreeType, GT1G texture cache, shader compilation
+
+**Phase 4 (campaign layer) — complete** ✅
+- Game state machine, main menu, strategic map, castle commands, tactical battle
+- Castle loyalty/tax/unrest, rebellion events, facilities, save/load slots
+
+**Phase 5 (officer management) — complete** ✅
+- Officer browser/detail UI, lord assignment, battle-map integration
+- Headless suites for battle, castle, save, and officer subsystems
+
+**Phase 6 (turn-based strategy layer) — complete** ✅
+- Eight regional factions with AI economy, recruitment, construction, and attacks
+- Monthly turns, seasonal food modifiers, statistical combat, victory/defeat
+- Ownership-aware map, strategy event log, save format v2
+- See [docs/STRATEGY_LAYER.md](docs/STRATEGY_LAYER.md)
+
+**Next** 🔲
+- Verify the per-castle region table against scenario data
+- Diplomacy, officer-assignment AI, tactical AI, and campaign balancing
 
 ## Game files
 
@@ -70,17 +89,23 @@ cmake -S . -B build -G Ninja
 # Compile
 cmake --build build
 
-# Run tests
+# Run unit tests
 ctest --test-dir build --output-on-failure
+
+# Headless subsystem suites (no window, no GPU required)
+./build/tensyoki --test-battle
+./build/tensyoki --test-castle
+./build/tensyoki --test-save
+./build/tensyoki --test-officer
+./build/tensyoki --test-strategy
 
 # Include the integration tests that read the real containers
 TENSYOKI_DATA_ROOT="/path/to/game/dir" ctest --test-dir build --output-on-failure
 ```
 
-> **Note on the committed `build/` directory**
-> The repository includes a snapshot of the build tree for reference. It contains absolute paths from the
-> original machine, so it cannot be reused directly — run the configuration step above to generate a
-> working build. Vendored dependency sources under `build/_deps/*-src/` are git-ignored and are
+> **Note on the `build/` directory**
+> `build/` is a local build tree and is not tracked by Git. Run the configuration step above to
+> generate it. Vendored dependency sources under `build/_deps/*-src/` are git-ignored and are
 > re-fetched by `FetchContent`.
 
 ## Running
@@ -117,6 +142,14 @@ src/
 │   ├── bin_parser.hpp/cpp  # .bin containers (LINK magic)
 │   ├── grp_parser.hpp/cpp  # Image decoding
 │   └── dat_parser.hpp/cpp  # Structured arrays (officers/castles)
+├── game/             # Campaign layer
+│   ├── game_state.hpp/cpp       # State machine
+│   ├── game_states.hpp/cpp      # Menu, map, castle, battle, officer states
+│   ├── map_view.hpp/cpp         # Strategic map rendering and interaction
+│   ├── castle_command.hpp/cpp   # Castle economy and commands
+│   ├── battle.hpp/cpp           # Tactical battle system
+│   ├── strategy.hpp/cpp         # Turn-based factions, AI, victory/defeat
+│   └── save_system.hpp/cpp      # Save slots (text format, version 2)
 ├── ui/               # Debug UI
 │   └── imgui_backend.hpp/cpp  # ImGui SDL3 + OpenGL backend
 └── test/             # Unit tests

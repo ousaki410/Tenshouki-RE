@@ -34,6 +34,15 @@ void CastleCommand::init(const SndataArchive& sndata) {
         cd.has_storehouse = false;
         cd.has_market = false;
         cd.lord_officer_id = 0;
+
+        // Default campaign setup: eight regions, one faction per region.
+        // The player starts in Kansai (region 4); every region's first castle
+        // is its capital.
+        cd.region_id = castle.index % 8;
+        cd.owner_id = default_owner_for_region(cd.region_id);
+        cd.is_player_owned = (cd.owner_id == 1);
+        cd.is_capital = (castle.index < 8);
+        cd.tax_rate = 50;
         castles_.push_back(cd);
     }
 
@@ -193,6 +202,13 @@ int32_t CastleCommand::facility_cost(FacilityType type) const {
 
 void CastleCommand::set_tax_rate(int32_t rate) {
     castle_tax_rate_ = std::clamp(rate, 0, 100);
+    // Keep per-castle tax rates in sync for player-owned castles so that
+    // save files and the castle detail panel reflect the current policy.
+    for (auto& castle : castles_) {
+        if (castle.is_player_owned) {
+            castle.tax_rate = castle_tax_rate_;
+        }
+    }
 }
 
 int32_t CastleCommand::calculate_tax_income(const CastleData& castle) const {
@@ -279,6 +295,7 @@ void CastleCommand::trigger_rebellion(uint32_t castle_index) {
     if (!castle) return;
 
     castle->is_player_owned = false;
+    castle->owner_id = 0;  // Rebels become independent
     castle->lord_officer_id = 0;
     castle->lord_name.clear();
     castle->lord_name_utf8.clear();

@@ -13,6 +13,7 @@
  */
 
 #include "map_view.hpp"
+#include "strategy.hpp"
 #include "core/logging.hpp"
 #include <imgui.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -44,7 +45,17 @@ bool MapView::init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
         cp.index = castle.index;
         cp.name = castle.name_raw;
         cp.name_utf8 = castle.name_utf8.empty() ? castle.name_raw : castle.name_utf8;
-        cp.region_id = 0;  // Will be assigned in build_regions()
+        cp.region_id = castle.index % 8;  // Fallback region assignment
+        if (castle_command_) {
+            if (const CastleData* cd = castle_command_->get_castle(castle.index)) {
+                cp.region_id = cd->region_id % 8;
+                cp.owner_id = cd->owner_id;
+                cp.is_player_owned = cd->is_player_owned;
+                cp.is_capital = cd->is_capital;
+                cp.loyalty = cd->loyalty;
+                cp.unrest = cd->unrest;
+            }
+        }
         castles_.push_back(cp);
     }
 
@@ -71,15 +82,15 @@ bool MapView::init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
         }
     }
 
-    // Set default campaign ownership: player owns castle 0, nearby castles
-    // are enemy-controlled, others are neutral
-    for (size_t i = 0; i < castles_.size(); ++i) {
-        if (i == 0) {
-            set_castle_owner(castles_[i].index, 1, true);  // Player starts with castle 0
-        } else if (i < 3) {
-            set_castle_owner(castles_[i].index, 2, false);  // Nearby enemy castles
+    // Fallback ownership when no castle manager is attached (e.g. tools).
+    if (!castle_command_) {
+        for (size_t i = 0; i < castles_.size(); ++i) {
+            if (i == 0) {
+                set_castle_owner(castles_[i].index, 1, true);
+            } else if (i < 3) {
+                set_castle_owner(castles_[i].index, 2, false);
+            }
         }
-        // Others remain neutral (owner_id = 0)
     }
 
     LOG_INFO("MapView: {} castles, {} routes, {} regions",
@@ -100,6 +111,12 @@ void MapView::update_castle_data(const CastleCommand& cmd) {
             cp.has_barracks = cd->has_barracks;
             cp.has_storehouse = cd->has_storehouse;
             cp.has_market = cd->has_market;
+            cp.region_id = cd->region_id % 8;
+            cp.owner_id = cd->owner_id;
+            cp.is_player_owned = cd->is_player_owned;
+            cp.is_capital = cd->is_capital;
+            cp.loyalty = cd->loyalty;
+            cp.unrest = cd->unrest;
         }
     }
 }
@@ -128,9 +145,10 @@ void MapView::generate_positions() {
     const uint32_t n = static_cast<uint32_t>(castles_.size());
     const uint32_t num_regions = 8;
 
-    // Assign each castle to a region deterministically
+    // Normalise the deterministic region assignment coming from sndata or
+    // from the castle manager.
     for (uint32_t i = 0; i < n; ++i) {
-        castles_[i].region_id = i % num_regions;
+        castles_[i].region_id %= num_regions;
     }
 
     // Region centers (roughly Japan-shaped)
@@ -593,6 +611,13 @@ void MapView::render_ui(Renderer& renderer) {
     int w = renderer.get_width();
     int h = renderer.get_height();
 
+    auto owner_label = [this](const CastlePos& cp) -> std::string {
+        if (cp.is_player_owned) return "Player";
+        if (cp.owner_id == 0) return "Neutral";
+        if (strategy_) return strategy_->faction_name(cp.owner_id);
+        return "Enemy";
+    };
+
     // --- Hover tooltip ---
     if (auto hover = hovered_castle()) {
         const CastlePos* cp = nullptr;
@@ -611,10 +636,12 @@ void MapView::render_ui(Renderer& renderer) {
                                cp->name_utf8.empty() ? cp->name.c_str()
                                                      : cp->name_utf8.c_str());
             ImGui::Separator();
+            ImGui::Text("Owner: %s", owner_label(*cp).c_str());
             ImGui::Text("Region: %u", cp->region_id);
             ImGui::Text("Level: %d", cp->level);
             ImGui::Text("Garrison: %d/%d", cp->garrison, cp->max_garrison);
             ImGui::Text("Gold: %d  Food: %d", cp->gold, cp->food);
+            ImGui::Text("Loyalty: %d  Unrest: %d", cp->loyalty, cp->unrest);
             ImGui::Separator();
             ImGui::Text("Facilities:");
             ImGui::Text("  Wall: %s", cp->has_wall ? "Yes" : "No");
@@ -645,10 +672,9 @@ void MapView::render_ui(Renderer& renderer) {
             ImGui::Text("Level: %d", cp->level);
             ImGui::Text("Position: (%.0f, %.0f)", cp->x, cp->y);
             ImGui::Separator();
-            ImGui::Text("Owner: %s",
-                cp->is_player_owned ? "Player" :
-                (cp->owner_id != 0 ? "Enemy" : "Neutral"));
+            ImGui::Text("Owner: %s", owner_label(*cp).c_str());
             ImGui::Text("Capital: %s", cp->is_capital ? "Yes" : "No");
+            ImGui::Text("Loyalty: %d  Unrest: %d", cp->loyalty, cp->unrest);
             ImGui::Separator();
             ImGui::Text("Garrison: %d/%d", cp->garrison, cp->max_garrison);
             ImGui::Text("Gold: %d", cp->gold);
@@ -712,8 +738,7 @@ void MapView::render_ui(Renderer& renderer) {
                     ImGui::TextDisabled("No adjacent enemy castles");
                 }
             } else {
-                ImGui::Text("Owner: %s",
-                    cp->owner_id != 0 ? "Enemy" : "Neutral");
+                ImGui::Text("Owner: %s", owner_label(*cp).c_str());
                 if (can_attack_from_player_castle(cp->index)) {
                     if (ImGui::Button("Attack This Castle", {-1, 0})) {
                         // Find nearest player castle to attack from
@@ -895,17 +920,19 @@ std::vector<uint32_t> MapView::get_attackable_enemy_castles(
     }
     if (!from_cp || !from_cp->is_player_owned) return result;
 
+    auto region_adjacent = [](uint32_t a, uint32_t b) {
+        a %= 8;
+        b %= 8;
+        if (a == b) return true;
+        return (a > b ? a - b : b - a) == 1;
+    };
+
     for (const auto& cp : castles_) {
-        if (!cp.is_player_owned && cp.owner_id != 0) {
-            // Check if adjacent (within same region and close distance)
-            if (cp.region_id == from_cp->region_id) {
-                float dx = cp.x - from_cp->x;
-                float dy = cp.y - from_cp->y;
-                float dist = std::sqrt(dx * dx + dy * dy);
-                if (dist < 25.0f) {  // Adjacent threshold
-                    result.push_back(cp.index);
-                }
-            }
+        if (cp.is_player_owned) continue;
+        // Enemy and independent castles in the same or a neighbouring region
+        // can be attacked.
+        if (region_adjacent(cp.region_id, from_cp->region_id)) {
+            result.push_back(cp.index);
         }
     }
     return result;
@@ -918,12 +945,17 @@ bool MapView::can_attack_from_player_castle(uint32_t target_castle) const {
     }
     if (!target_cp || target_cp->is_player_owned) return false;
 
+    auto region_adjacent = [](uint32_t a, uint32_t b) {
+        a %= 8;
+        b %= 8;
+        if (a == b) return true;
+        return (a > b ? a - b : b - a) == 1;
+    };
+
     for (const auto& cp : castles_) {
-        if (cp.is_player_owned && cp.region_id == target_cp->region_id) {
-            float dx = target_cp->x - cp.x;
-            float dy = target_cp->y - cp.y;
-            float dist = std::sqrt(dx * dx + dy * dy);
-            if (dist < 25.0f) return true;
+        if (cp.is_player_owned &&
+            region_adjacent(cp.region_id, target_cp->region_id)) {
+            return true;
         }
     }
     return false;

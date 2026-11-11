@@ -48,7 +48,9 @@ struct GameDate {
 
 /// Game clock: controls date advancement speed and accumulated time
 struct GameClock {
-    bool paused = false;
+    // The campaign is turn-based: the date advances one month per turn, not
+    // in real time. Set paused = false to enable the optional real-time clock.
+    bool paused = true;
     float speed = 1.0f;           // Days per second (1.0 = 1 day/sec)
     float accumulator = 0.0f;  // Seconds accumulated since last day
     float seconds_per_day = 2.0f;  // Real seconds per game day

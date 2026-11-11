@@ -20,6 +20,7 @@
 #include "render/shader_compiler.hpp"
 #include "castle_command.hpp"
 #include "save_system.hpp"
+#include "strategy.hpp"
 #include <memory>
 #include <optional>
 
@@ -46,6 +47,7 @@ public:
     GameDate date;
     GameClock clock;
     CastleCommand castle_command;
+    StrategyManager strategy;
 
     // State transition requests (set by states, processed by Application)
     enum class PendingState {
