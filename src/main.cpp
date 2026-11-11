@@ -188,8 +188,6 @@ private:
             LOG_WARN("Texture atlas not found: {}", atlas_path.string());
         }
         
-        // Set up the Chinese font
-        imgui_->load_font_default(18.0f);
         imgui_->set_style_dark();
         
         // Test resource parsing
@@ -243,6 +241,74 @@ private:
             }
         } else {
             LOG_WARN("sndata1.dat not found: {}", sndata_path.string());
+        }
+
+        // ImGui's built-in font has no CJK glyphs. Use a scalable Latin base
+        // font and merge a CJK fallback that covers only the characters used
+        // by the scenario's castle/officer names. This keeps the UI atlas
+        // small (the full Japanese range has about 20k glyphs).
+        {
+            ImFont* ui_font = nullptr;
+            const char* base_fonts[] = {
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                nullptr,
+            };
+            for (const char* path : base_fonts) {
+                if (!path) break;
+                if (std::filesystem::exists(path)) {
+                    ui_font = imgui_->load_font(path, 18.0f);
+                    if (ui_font) break;
+                }
+            }
+            if (!ui_font) {
+                ui_font = imgui_->load_font_default(18.0f);
+            }
+            imgui_->set_default_font(ui_font);
+
+            ImFontGlyphRangesBuilder builder;
+            builder.AddRanges(ImGui::GetIO().Fonts->GetGlyphRangesDefault());
+
+            // Static CJK text used by the UI (date labels and debug overlay).
+            builder.AddText("年月日");
+            builder.AddText("信長の野望・天翔記");
+            builder.AddText("織田信長・羽柴秀吉・徳川家康");
+
+            // Add every character used by scenario names. Older save files
+            // may still contain NUL padding inside name_utf8, so strip NULs.
+            auto add_name = [&builder](const std::string& name) {
+                std::string clean;
+                clean.reserve(name.size());
+                for (char ch : name) {
+                    if (ch != '\0') clean.push_back(ch);
+                }
+                if (!clean.empty()) builder.AddText(clean.c_str());
+            };
+            for (const auto& castle : sndata_loaded_.castles) {
+                add_name(castle.name_utf8);
+            }
+            for (const auto& officer : sndata_loaded_.officers) {
+                add_name(officer.name_utf8);
+            }
+
+            ImVector<ImWchar> ranges;
+            builder.BuildRanges(&ranges);
+
+            ImFont* cjk_font = imgui_->load_font(
+                "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+                18.0f, ranges.Data, /*merge=*/true);
+            if (cjk_font) {
+                // Force the atlas to build while the temporary range array
+                // is still alive (ImFontConfig only stores a pointer).
+                unsigned char* atlas_pixels = nullptr;
+                int atlas_w = 0, atlas_h = 0;
+                ImGui::GetIO().Fonts->GetTexDataAsRGBA32(
+                    &atlas_pixels, &atlas_w, &atlas_h);
+                LOG_INFO("ImGui: merged CJK fallback ({} codepoints, atlas {}x{})",
+                         ranges.Size, atlas_w, atlas_h);
+            } else {
+                LOG_WARN("ImGui: CJK fallback font unavailable");
+            }
         }
 
         // Load res_grp.bin for officer portrait textures

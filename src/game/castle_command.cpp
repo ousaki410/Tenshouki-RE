@@ -25,8 +25,10 @@ void CastleCommand::init(const SndataArchive& sndata) {
         cd.level = 1;
         cd.defense = 10;
         cd.max_defense = 50;
-        cd.garrison = 0;
+        // Start with a defensive garrison. Without it every castle would be
+        // trivially captured by the first AI attack on turn one.
         cd.max_garrison = 100;
+        cd.garrison = cd.max_garrison * 3 / 5;  // 60 troops
         cd.gold = 1000;
         cd.food = 500;
         cd.has_wall = false;

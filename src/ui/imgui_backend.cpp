@@ -123,11 +123,15 @@ void ImGuiBackend::process_event(const SDL_Event* event) {
     ImGui_ImplSDL3_ProcessEvent(event);
 }
 
-ImFont* ImGuiBackend::load_font(const std::string& path, float size, 
-                                const ImWchar* ranges) {
+ImFont* ImGuiBackend::load_font(const std::string& path, float size,
+                                const ImWchar* ranges, bool merge) {
     ImGui::SetCurrentContext(impl_->ctx);
     ImGuiIO& io = ImGui::GetIO();
-    ImFont* font = io.Fonts->AddFontFromFileTTF(path.c_str(), size, nullptr, ranges);
+
+    ImFontConfig config;
+    config.MergeMode = merge;
+    ImFont* font = io.Fonts->AddFontFromFileTTF(
+        path.c_str(), size, &config, ranges);
     if (!font) {
         LOG_ERROR("Failed to load font: {}", path);
     }

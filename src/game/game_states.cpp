@@ -49,7 +49,7 @@ void MainMenuState::render() {
 
     ImGui::Text("TENSHOUKI - RE");
     ImGui::Text("Nobunaga's Ambition: Tenshouki HD");
-    ImGui::Text("Linux Port - Phase 4");
+    ImGui::Text("Linux Port - Phase 6");
     ImGui::Separator();
 
     const char* items[] = {"New Game", "Load Game", "Quit"};
@@ -430,11 +430,11 @@ void MapViewState::render() {
     ImGui::End();
 
     // Save/Load panel
-    ImGui::SetNextWindowPos({(float)ctx_.renderer->get_width() - 200, 200}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({190, 120}, ImGuiCond_Always);
+    ImGui::SetNextWindowPos({(float)ctx_.renderer->get_width() - 240, 200},
+                            ImGuiCond_Always);
+    ImGui::SetNextWindowSize({220, 190}, ImGuiCond_Always);
     ImGui::Begin("Save/Load", nullptr,
-                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-                 ImGuiWindowFlags_AlwaysAutoResize);
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
     ImGui::Text("Save Game:");
     static int save_slot = 1;
     ImGui::InputInt("##save_slot", &save_slot, 1, 5);
@@ -488,11 +488,12 @@ void MapViewState::render() {
     // Strategy log: recent campaign events (AI actions, captures, seasons)
     const auto& strategy_events = ctx_.strategy.events();
     if (!strategy_events.empty()) {
-        float panel_h = 190.0f;
+        // Leave room for the application status bar at the bottom.
+        float panel_h = 230.0f;
         ImGui::SetNextWindowPos(
-            {10.0f, (float)ctx_.renderer->get_height() - panel_h - 10.0f},
+            {10.0f, (float)ctx_.renderer->get_height() - panel_h - 42.0f},
             ImGuiCond_Always);
-        ImGui::SetNextWindowSize({440, panel_h}, ImGuiCond_Always);
+        ImGui::SetNextWindowSize({460, panel_h}, ImGuiCond_Always);
         ImGui::Begin("Strategy Log", nullptr,
                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 

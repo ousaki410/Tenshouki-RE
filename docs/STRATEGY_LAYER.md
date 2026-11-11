@@ -56,6 +56,11 @@ The player starts in region 4 (Kansai). `default_owner_for_region()` and
 `default_region_for_owner()` in `castle_command.hpp` are the single mapping used
 by campaign init, save migration, the map, and tests.
 
+Every castle starts with 60 troops (60% of `max_garrison`), 1,000 gold, and
+500 food. The starting garrison prevents the aggressive AI factions from
+capturing undefended player castles on the first turn; the player still has to
+recruit and build to hold the line afterwards.
+
 Two castles are adjacent when they share a region or belong to neighbouring
 regions in the chain. This is the only attack-range rule; it is independent of
 screen distance.

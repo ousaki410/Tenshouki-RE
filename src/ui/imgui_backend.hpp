@@ -37,8 +37,10 @@ public:
     void process_event(const SDL_Event* event);
     
     // Font management
-    ImFont* load_font(const std::string& path, float size, 
-                      const ImWchar* ranges = nullptr);
+    // When merge is true, the font is merged into the most recently added
+    // font (useful for adding CJK fallback glyphs to a Latin base font).
+    ImFont* load_font(const std::string& path, float size,
+                      const ImWchar* ranges = nullptr, bool merge = false);
     ImFont* load_font_default(float size);
     void set_default_font(ImFont* font);
     

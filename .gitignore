@@ -22,6 +22,9 @@ NOBUNAGA'S AMBITION*/
 tensyoki_extracted/
 data/
 
+# Local save files
+saves/
+
 # Local helpers
 pathlib
 

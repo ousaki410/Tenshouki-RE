@@ -19,19 +19,24 @@
 namespace tensyoki {
 
 std::string decode_cp932(std::span<const uint8_t> data) {
-#if TENSYOKI_HAVE_ICONV
-    // Strip trailing NUL bytes for the conversion
-    size_t len = data.size();
-    while (len > 0 && data[len - 1] == 0) --len;
-    if (len == 0) return {};
+    // Remove NUL bytes before conversion. Besides trailing padding, some
+    // officer records store the surname and given name as separate
+    // NUL-terminated segments; concatenating them yields the full name.
+    std::string compact;
+    compact.reserve(data.size());
+    for (uint8_t b : data) {
+        if (b != 0) compact.push_back(static_cast<char>(b));
+    }
+    if (compact.empty()) return {};
 
+#if TENSYOKI_HAVE_ICONV
     iconv_t cd = iconv_open("UTF-8", "CP932");
     if (cd == (iconv_t)(-1)) {
         LOG_WARN("iconv CP932 not available; falling back to ASCII passthrough");
     } else {
-        std::string in((const char*)data.data(), len);
+        std::string in = std::move(compact);
         std::string out;
-        out.reserve(len * 4);  // UTF-8 can be up to 4 bytes per source byte
+        out.reserve(in.size() * 4);  // UTF-8 can be up to 4 bytes per source byte
         const char* in_ptr = in.data();
         size_t in_left = in.size();
         char out_buf[256];
@@ -57,9 +62,10 @@ std::string decode_cp932(std::span<const uint8_t> data) {
 #endif
     // Fallback: printable ASCII through, everything else '?'
     std::string out;
-    out.reserve(data.size());
-    for (uint8_t b : data) {
-        if (b >= 0x20 && b < 0x7F) out.push_back(static_cast<char>(b));
+    out.reserve(compact.size());
+    for (char c : compact) {
+        const auto b = static_cast<uint8_t>(c);
+        if (b >= 0x20 && b < 0x7F) out.push_back(c);
         else out.push_back('?');
     }
     return out;
