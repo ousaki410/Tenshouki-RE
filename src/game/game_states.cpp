@@ -7,6 +7,9 @@
 #include <fmt/format.h>
 #include <imgui.h>
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstring>
 
 namespace tensyoki {
 
@@ -183,6 +186,14 @@ bool MapViewState::update(float dt) {
             ctx_.pending_push = GameContext::PendingState::CastleCommand;
         }
     }
+    if (map_view_.request_castle_detail) {
+        map_view_.clear_requests();
+        auto sel = map_view_.selected_castle();
+        if (sel) {
+            ctx_.selected_castle_id = *sel;
+            ctx_.pending_push = GameContext::PendingState::CastleDetail;
+        }
+    }
     if (map_view_.request_battle) {
         map_view_.clear_requests();
         if (map_view_.attack_from_castle && map_view_.attack_target_castle) {
@@ -200,6 +211,58 @@ bool MapViewState::update(float dt) {
             }
         }
         ctx_.pending_push = GameContext::PendingState::Battle;
+    }
+
+    // Process battle result after returning from BattleState
+    if (ctx_.battle_result.has_value() && ctx_.battle_target_castle.has_value() && ctx_.sndata) {
+        auto result = *ctx_.battle_result;
+        uint32_t target_castle = *ctx_.battle_target_castle;
+        uint32_t source_castle = ctx_.selected_castle_id;
+
+        auto* target = ctx_.castle_command.get_castle(target_castle);
+        auto* source = ctx_.castle_command.get_castle(source_castle);
+
+        if (result == BattleResult::PlayerVictory) {
+            // Capture the target castle
+            if (target) {
+                target->is_player_owned = true;
+                target->lord_officer_id = 0;  // No lord assigned yet
+                target->lord_name.clear();
+                target->lord_name_utf8.clear();
+                target->loyalty = 50;  // Reset loyalty after capture
+                target->unrest = 10;   // Low unrest after capture
+                // Set a reasonable garrison from battle outcome
+                target->garrison = std::max(target->garrison, 30);
+                target->garrison = std::min(target->garrison, target->max_garrison);
+                LOG_INFO("MapViewState: Player captured castle {}", target_castle);
+            }
+            // Reward source castle with gold
+            if (source) {
+                source->gold += 500;
+                LOG_INFO("MapViewState: Source castle {} gained 500 gold from victory", source_castle);
+            }
+        } else if (result == BattleResult::PlayerDefeat) {
+            // Attack failed: source castle loses troops
+            if (source) {
+                source->garrison = std::max(0, source->garrison - 20);
+                LOG_INFO("MapViewState: Source castle {} lost 20 troops from defeat", source_castle);
+            }
+            // If target was player-owned (defensive battle), it may be lost
+            if (target && target->is_player_owned) {
+                target->is_player_owned = false;
+                target->lord_officer_id = 0;
+                target->lord_name.clear();
+                target->lord_name_utf8.clear();
+                LOG_INFO("MapViewState: Player lost castle {} in defensive battle", target_castle);
+            }
+        }
+
+        // Refresh map view castle data
+        map_view_.update_castle_data(ctx_.castle_command);
+
+        // Clear battle result
+        ctx_.battle_result.reset();
+        ctx_.battle_target_castle.reset();
     }
 
     return true;
@@ -360,6 +423,17 @@ OfficerDetailState::OfficerDetailState(GameContext& ctx) : ctx_(ctx) {}
 
 void OfficerDetailState::enter() {
     LOG_INFO("OfficerDetailState: enter");
+    if (selected_officer_ >= 0 && ctx_.sndata) {
+        // Validate the selected officer still exists
+        bool found = false;
+        for (const auto& officer : ctx_.sndata->officers) {
+            if (officer.slot == static_cast<uint32_t>(selected_officer_)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) selected_officer_ = -1;
+    }
 }
 
 bool OfficerDetailState::update(float dt) {
@@ -367,88 +441,358 @@ bool OfficerDetailState::update(float dt) {
     return true;
 }
 
+const CastleData* OfficerDetailState::find_officer_castle(
+    uint16_t officer_id) const {
+    if (!ctx_.sndata) return nullptr;
+    for (const auto& castle : ctx_.castle_command.castles()) {
+        if (castle.lord_officer_id == officer_id) {
+            return &castle;
+        }
+    }
+    return nullptr;
+}
+
+const char* OfficerDetailState::get_attr_name(size_t offset) const {
+    // Hypothesis mapping for sndata attribute bytes (observed offsets)
+    switch (offset) {
+        case 24:  return "Loyalty";
+        case 25:  return "Command";
+        case 26:  return "Warfare";
+        case 27:  return "Wisdom";
+        case 28:  return "Politics";
+        case 29:  return "Charm";
+        case 30:  return "Ambition?";
+        case 31:  return "Health?";
+        case 32:  return "Age?";
+        case 33:  return "Trait?";
+        case 34:  return "Skill?";
+        case 35:  return "Move?";
+        case 36:  return "Range?";
+        case 37:  return "Reserved";
+        case 38:  return "Reserved";
+        case 39:  return "Reserved";
+        case 40:  return "Reserved";
+        case 41:  return "Reserved";
+        case 42:  return "Reserved";
+        case 43:  return "Reserved";
+        case 44:  return "Reserved";
+        case 45:  return "Reserved";
+        case 46:  return "Reserved";
+        default:  return "Unknown";
+    }
+}
+
+void OfficerDetailState::render_attr_editor(Officer& officer) {
+    ImGui::Text("Attribute Editor (raw bytes)");
+    ImGui::SameLine();
+    ImGui::TextDisabled("(offset 0-46)");
+
+    ImGui::BeginChild("AttrEditor", ImVec2(0, 200), true);
+
+    const auto& attr = officer.attr;
+    int cols = 0;
+    for (size_t i = 0; i < attr.size(); ++i) {
+        if (i == 18 || i == 19) continue;  // ID field, skip
+        if (cols > 0) ImGui::SameLine();
+
+        uint8_t val = attr[i];
+        // Build label using snprintf to avoid fmt consteval issues with size_t
+        char label_buf[16];
+        std::snprintf(label_buf, sizeof(label_buf), "[%2zu]", i);
+        std::string label = label_buf;
+        const char* attr_name = get_attr_name(i);
+        if (std::string(attr_name) != "Unknown" &&
+            std::string(attr_name) != "Reserved") {
+            label += " " + std::string(attr_name);
+        }
+
+        // Editable input
+        int32_t ival = static_cast<int32_t>(val);
+        if (ImGui::InputInt(label.c_str(), &ival)) {
+            ival = std::clamp(ival, 0, 255);
+            auto& mutable_attr = officer.attr;
+            mutable_attr[i] = static_cast<uint8_t>(ival);
+        }
+
+        if (++cols % 6 == 0) ImGui::Spacing();
+    }
+
+    ImGui::EndChild();
+
+    ImGui::Separator();
+
+    // Quick-edit common attributes
+    ImGui::Text("Quick Edit:");
+    if (attr.size() > 24) {
+        int32_t loyalty = attr[24];
+        if (ImGui::InputInt("Loyalty", &loyalty)) {
+            loyalty = std::clamp(loyalty, 0, 100);
+            officer.attr[24] = static_cast<uint8_t>(loyalty);
+        }
+    }
+    if (attr.size() > 25) {
+        int32_t command = attr[25];
+        if (ImGui::InputInt("Command", &command)) {
+            command = std::clamp(command, 0, 100);
+            officer.attr[25] = static_cast<uint8_t>(command);
+        }
+    }
+    if (attr.size() > 26) {
+        int32_t warfare = attr[26];
+        if (ImGui::InputInt("Warfare", &warfare)) {
+            warfare = std::clamp(warfare, 0, 100);
+            officer.attr[26] = static_cast<uint8_t>(warfare);
+        }
+    }
+    if (attr.size() > 27) {
+        int32_t wisdom = attr[27];
+        if (ImGui::InputInt("Wisdom", &wisdom)) {
+            wisdom = std::clamp(wisdom, 0, 100);
+            officer.attr[27] = static_cast<uint8_t>(wisdom);
+        }
+    }
+    if (attr.size() > 28) {
+        int32_t politics = attr[28];
+        if (ImGui::InputInt("Politics", &politics)) {
+            politics = std::clamp(politics, 0, 100);
+            officer.attr[28] = static_cast<uint8_t>(politics);
+        }
+    }
+    if (attr.size() > 29) {
+        int32_t charm = attr[29];
+        if (ImGui::InputInt("Charm", &charm)) {
+            charm = std::clamp(charm, 0, 100);
+            officer.attr[29] = static_cast<uint8_t>(charm);
+        }
+    }
+}
+
 void OfficerDetailState::render() {
     ImGui::Begin("Officer Detail", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
 
-    if (ctx_.sndata && ctx_.sndata->officer_count() > 0) {
-        ImGui::Text("Officers: %zu", ctx_.sndata->officer_count());
-        ImGui::Separator();
-
-        int count = 0;
-        for (const auto& officer : ctx_.sndata->officers) {
-            if (count >= 30) break;
-            std::string label = fmt::format("[{}] id={} {}",
-                                            officer.slot,
-                                            officer.id,
-                                            officer.name_utf8.empty()
-                                                ? officer.name_raw
-                                                : officer.name_utf8);
-            if (ImGui::Selectable(label.c_str(),
-                                  selected_officer_ == officer.slot)) {
-                selected_officer_ = officer.slot;
-            }
-            ++count;
-        }
-    } else {
+    if (!ctx_.sndata) {
         ImGui::Text("No officer data loaded.");
+        ImGui::Separator();
+        if (ImGui::Button("Back")) {
+            ctx_.request_pop = true;
+        }
+        ImGui::End();
+        return;
+    }
+
+    const auto& officers = ctx_.sndata->officers;
+    if (officers.empty()) {
+        ImGui::Text("No officer data loaded.");
+        ImGui::Separator();
+        if (ImGui::Button("Back")) {
+            ctx_.request_pop = true;
+        }
+        ImGui::End();
+        return;
+    }
+
+    // ---- Search filter ----
+    ImGui::Text("Search:");
+    static char search_buf[128] = "";
+    if (search_filter_.empty()) {
+        search_buf[0] = '\0';
+    } else {
+        strncpy(search_buf, search_filter_.c_str(), sizeof(search_buf) - 1);
+        search_buf[sizeof(search_buf) - 1] = '\0';
+    }
+    if (ImGui::InputText("##search", search_buf, IM_ARRAYSIZE(search_buf))) {
+        search_filter_ = search_buf;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear")) {
+        search_filter_.clear();
     }
 
     ImGui::Separator();
-    if (ImGui::Button("Back")) {
-        ctx_.request_pop = true;
+
+    // ---- Officer list ----
+    ImGui::Text("Officers: %zu", officers.size());
+    ImGui::BeginChild("OfficerList", ImVec2(340, 260), true);
+
+    int count = 0;
+    for (const auto& officer : officers) {
+        if (count >= 200) break;
+
+        // Apply search filter
+        if (!search_filter_.empty()) {
+            std::string name = officer.name_utf8.empty()
+                ? officer.name_raw : officer.name_utf8;
+            std::string lower_name = name;
+            std::string lower_filter = search_filter_;
+            std::transform(lower_name.begin(), lower_name.end(),
+                           lower_name.begin(), ::tolower);
+            std::transform(lower_filter.begin(), lower_filter.end(),
+                           lower_filter.begin(), ::tolower);
+            if (lower_name.find(lower_filter) == std::string::npos &&
+                fmt::format("{}", officer.id).find(lower_filter) == std::string::npos) {
+                ++count;
+                continue;
+            }
+        }
+
+        // Find officer's castle (if assigned as lord)
+        const CastleData* assigned_castle = find_officer_castle(officer.id);
+        std::string status_tag;
+        if (officer.id == 0xFFFF) {
+            status_tag = " [EMPTY]";
+        } else if (assigned_castle) {
+            status_tag = fmt::format(" [Lord: {}]",
+                assigned_castle->name_utf8.empty()
+                    ? assigned_castle->name
+                    : assigned_castle->name_utf8);
+        } else {
+            status_tag = " [Unassigned]";
+        }
+
+        std::string label = fmt::format(
+            "[{}] id={} {}{}",
+            officer.slot,
+            officer.id,
+            officer.name_utf8.empty() ? officer.name_raw : officer.name_utf8,
+            status_tag);
+
+        bool selected = (selected_officer_ == static_cast<int>(officer.slot));
+        if (ImGui::Selectable(label.c_str(), selected)) {
+            selected_officer_ = static_cast<int>(officer.slot);
+        }
+        ++count;
     }
+    ImGui::EndChild();
 
-    ImGui::End();
+    ImGui::SameLine();
 
-    if (selected_officer_ >= 0 && ctx_.sndata) {
-        for (const auto& officer : ctx_.sndata->officers) {
+    // ---- Selected officer detail ----
+    if (selected_officer_ >= 0) {
+        bool found = false;
+        for (auto& officer : ctx_.sndata->officers) {
             if (officer.slot == static_cast<uint32_t>(selected_officer_)) {
-                ImGui::Begin("Officer Details", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize);
+                found = true;
+
+                ImGui::BeginChild("OfficerDetails", ImVec2(0, 0), true);
+
+                std::string display_name =
+                    officer.name_utf8.empty()
+                        ? officer.name_raw
+                        : officer.name_utf8;
+                ImGui::TextColored(ImVec4(1, 1, 0, 1), "%s",
+                                   display_name.c_str());
+                ImGui::SameLine();
+                if (officer.id == 0xFFFF) {
+                    ImGui::TextDisabled(" [EMPTY SLOT]");
+                }
+
+                ImGui::Separator();
                 ImGui::Text("Slot: %u", officer.slot);
                 ImGui::Text("ID: %u", officer.id);
                 ImGui::Text("Status: %u", officer.status);
                 ImGui::Text("Gender: %u", officer.gender);
-                ImGui::Text("Name: %s",
-                            officer.name_utf8.empty()
-                                ? officer.name_raw.c_str()
-                                : officer.name_utf8.c_str());
-                ImGui::Separator();
-                ImGui::Text("Attributes (attr bytes):");
-                ImGui::BeginChild("AttrBytes", ImVec2(260, 110), true);
-                const auto& attr = officer.attr;
-                for (size_t i = 0; i < attr.size(); ++i) {
-                    uint8_t b = attr[i];
-                    if (i == 18 || i == 19 || i == 22 || i == 23) continue;
-                    ImGui::Text("  [%2u] = %3u (0x%02X)", i, b, b);
-                    if ((i + 1) % 6 == 0) ImGui::Spacing();
-                }
-                ImGui::EndChild();
-                ImGui::Separator();
-                ImGui::Text("Possible attributes (hypothesis):");
-                ImGui::BeginChild("AttrHypo", ImVec2(260, 80), true);
-                auto show_attr = [&](size_t offset, const char* name) {
-                    if (offset < attr.size()) {
-                        uint8_t b = attr[offset];
-                        bool valid = (b != 0xFF && b != 0);
-                        ImGui::TextColored(valid ? ImVec4(0.8f, 0.9f, 1.0f, 1.0f)
-                                                 : ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
-                                           "%s [%2u]: %3u", name, offset, b);
+
+                // Assigned castle info
+                const CastleData* assigned = find_officer_castle(officer.id);
+                if (assigned) {
+                    ImGui::Text("Assigned to: %s",
+                        assigned->name_utf8.empty()
+                            ? assigned->name.c_str()
+                            : assigned->name_utf8.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::Button("Dismiss Lord##officer_detail")) {
+                        auto result = ctx_.castle_command.dismiss_lord(
+                            assigned->index);
+                        if (result == CommandResult::Success) {
+                            LOG_INFO("Dismissed officer {} from castle {}",
+                                     officer.id, assigned->index);
+                        }
                     }
-                };
-                show_attr(24, "Loyalty?");
-                show_attr(25, "Command?");
-                show_attr(26, "Warfare?");
-                show_attr(27, "Wisdom?");
-                show_attr(28, "Politics?");
-                show_attr(29, "Charm?");
+                } else if (officer.id != 0xFFFF) {
+                    // Show castles available for assignment
+                    ImGui::Text("Assigned to: (none)");
+                    ImGui::SameLine();
+                    if (ImGui::Button("Assign as Lord##officer_detail")) {
+                        show_attr_editor_ = false;
+                        ImGui::OpenPopup("Assign Officer to Castle");
+                    }
+                }
+
+                ImGui::Separator();
+
+                // Attributes section
+                ImGui::Text("Attributes:");
+                if (ImGui::TreeNode("Raw Attributes##officer")) {
+                    ImGui::BeginChild("AttrBytes", ImVec2(260, 110), true);
+                    const auto& attr = officer.attr;
+                    for (size_t i = 0; i < attr.size(); ++i) {
+                        if (i == 18 || i == 19) continue;  // ID field
+                        uint8_t b = attr[i];
+                        if ((i + 1) % 6 == 0 && i > 0) ImGui::Spacing();
+                        ImGui::Text("  [%2u] = %3u (0x%02X)", i, b, b);
+                    }
+                    ImGui::EndChild();
+                    ImGui::TreePop();
+                }
+
+                // Attribute editor toggle
+                ImGui::SameLine();
+                if (ImGui::Button("Edit Attributes##officer")) {
+                    show_attr_editor_ = !show_attr_editor_;
+                }
+
+                if (show_attr_editor_) {
+                    render_attr_editor(officer);
+                }
+
                 ImGui::EndChild();
-                ImGui::End();
                 break;
             }
         }
+
+        if (!found) {
+            selected_officer_ = -1;
+        }
     }
+
+    // ---- Assign officer to castle popup ----
+    if (ImGui::BeginPopupModal("Assign Officer to Castle", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Select a castle to assign this officer as lord:");
+        ImGui::Separator();
+
+        for (const auto& castle : ctx_.castle_command.castles()) {
+            if (castle.lord_officer_id != 0) continue;  // Already has a lord
+            std::string label = fmt::format(
+                "[{}] {} (Lv.{})",
+                castle.index,
+                castle.name_utf8.empty() ? castle.name : castle.name_utf8,
+                castle.level);
+            if (ImGui::Selectable(label.c_str())) {
+                auto result = ctx_.castle_command.assign_lord(
+                    castle.index, static_cast<uint16_t>(selected_officer_));
+                if (result == CommandResult::Success) {
+                    LOG_INFO("Assigned officer {} to castle {}",
+                             selected_officer_, castle.index);
+                }
+                ImGui::CloseCurrentPopup();
+            }
+        }
+
+        ImGui::Separator();
+        if (ImGui::Button("Cancel", {100, 0})) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button("Back", {-1, 0})) {
+        ctx_.request_pop = true;
+    }
+
+    ImGui::End();
 }
 
 // ===========================================================================
@@ -749,6 +1093,150 @@ void CastleCommandState::render() {
 }
 
 // ===========================================================================
+// CastleDetailState
+// ===========================================================================
+
+CastleDetailState::CastleDetailState(GameContext& ctx) : ctx_(ctx) {}
+
+void CastleDetailState::enter() {
+    LOG_INFO("CastleDetailState: enter");
+    // If no castle is preselected, default to the context's selected castle
+    if (selected_castle_ == 0 && ctx_.selected_castle_id != 0) {
+        selected_castle_ = ctx_.selected_castle_id;
+    }
+}
+
+bool CastleDetailState::update(float dt) {
+    (void)dt;
+    return true;
+}
+
+void CastleDetailState::render() {
+    ImGui::Begin("Castle Detail", nullptr,
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+    if (!ctx_.sndata || ctx_.sndata->castle_count() == 0) {
+        ImGui::Text("No castle data loaded.");
+        ImGui::Separator();
+        if (ImGui::Button("Back")) {
+            ctx_.request_pop = true;
+        }
+        ImGui::End();
+        return;
+    }
+
+    auto* castle = ctx_.castle_command.get_castle(selected_castle_);
+    if (!castle) {
+        ImGui::Text("Castle not found.");
+        ImGui::Separator();
+        if (ImGui::Button("Back")) {
+            ctx_.request_pop = true;
+        }
+        ImGui::End();
+        return;
+    }
+
+    // ---- Castle header ----
+    std::string display_name =
+        castle->name_utf8.empty() ? castle->name : castle->name_utf8;
+    ImGui::TextColored(ImVec4(1, 1, 0, 1), "%s", display_name.c_str());
+    ImGui::SameLine();
+    if (castle->is_capital) {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), " [CAPITAL]");
+    }
+    ImGui::Separator();
+
+    // ---- Basic info ----
+    ImGui::Text("Index: %u", castle->index);
+    ImGui::Text("Region: %u", castle->region_id);
+    ImGui::Text("Level: %d", castle->level);
+    ImGui::Text("Owner: %s",
+        castle->is_player_owned ? "Player" :
+        (castle->lord_officer_id != 0 ? "Enemy (has lord)" : "Neutral"));
+    ImGui::Text("Capital: %s", castle->is_capital ? "Yes" : "No");
+    ImGui::Separator();
+
+    // ---- Defense ----
+    ImGui::Text("Defense: %d/%d", castle->defense, castle->max_defense);
+    ImGui::SameLine();
+    float def_pct = static_cast<float>(castle->defense) /
+                    static_cast<float>(castle->max_defense);
+    ImGui::ProgressBar(def_pct, ImVec2(0, 0));
+    ImGui::Separator();
+
+    // ---- Garrison ----
+    ImGui::Text("Garrison: %d/%d", castle->garrison, castle->max_garrison);
+    ImGui::SameLine();
+    float garr_pct = static_cast<float>(castle->garrison) /
+                     static_cast<float>(castle->max_garrison);
+    ImGui::ProgressBar(garr_pct, ImVec2(0, 0));
+    ImGui::Separator();
+
+    // ---- Resources ----
+    ImGui::Text("Gold: %d", castle->gold);
+    ImGui::Text("Food: %d", castle->food);
+    ImGui::Separator();
+
+    // ---- Facilities ----
+    ImGui::Text("Facilities:");
+    ImGui::Text("  Wall: %s", castle->has_wall ? "Yes" : "No");
+    ImGui::Text("  Barracks: %s", castle->has_barracks ? "Yes" : "No");
+    ImGui::Text("  Storehouse: %s", castle->has_storehouse ? "Yes" : "No");
+    ImGui::Text("  Market: %s", castle->has_market ? "Yes" : "No");
+    ImGui::Separator();
+
+    // ---- Lord/Officer ----
+    ImGui::Text("Lord: %s",
+        castle->lord_officer_id != 0
+            ? ctx_.castle_command.get_officer_name(castle->lord_officer_id)
+                .c_str()
+            : "(none)");
+    ImGui::Separator();
+
+    // ---- Loyalty / Unrest ----
+    ImGui::Text("Loyalty: %d", castle->loyalty);
+    ImGui::SameLine();
+    float loy_pct = static_cast<float>(castle->loyalty) / 100.0f;
+    ImGui::ProgressBar(loy_pct, ImVec2(0, 0));
+    ImGui::Text("Unrest: %d", castle->unrest);
+    ImGui::SameLine();
+    float unrest_pct = static_cast<float>(castle->unrest) / 100.0f;
+    ImGui::ProgressBar(unrest_pct, ImVec2(0, 0));
+    ImGui::Separator();
+
+    // ---- Tax ----
+    ImGui::Text("Tax Rate: %d%%", castle->tax_rate);
+    ImGui::Text("Tax Income: %d",
+                ctx_.castle_command.calculate_tax_income(*castle));
+    ImGui::Separator();
+
+    // ---- Production ----
+    ImGui::Text("Gold Income: %d",
+                ctx_.castle_command.calculate_gold_income(*castle));
+    ImGui::Text("Food Production: %d",
+                ctx_.castle_command.calculate_food_production(*castle));
+    ImGui::Text("Food Consumption: %d",
+                ctx_.castle_command.calculate_food_consumption(*castle));
+    ImGui::Text("Auto Defense: %d",
+                ctx_.castle_command.calculate_auto_defense(*castle));
+    ImGui::Separator();
+
+    // ---- Actions ----
+    if (ImGui::Button("Castle Commands", {-1, 0})) {
+        ctx_.selected_castle_id = selected_castle_;
+        ctx_.pending_push = GameContext::PendingState::CastleCommand;
+        ctx_.request_pop = true;  // Pop this detail state first
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Back to Map", {-1, 0})) {
+        ctx_.request_pop = true;
+    }
+
+    ImGui::End();
+}
+
+// ===========================================================================
 // BattleState
 // ===========================================================================
 
@@ -759,12 +1247,13 @@ void BattleState::enter() {
 
     // Check if we have a target castle for map-to-battle linkage
     if (ctx_.battle_target_castle.has_value() && ctx_.sndata) {
+        battle_target_castle_ = *ctx_.battle_target_castle;
         battle_data_.init_from_castle(*ctx_.battle_target_castle, true);
-        LOG_INFO("BattleState: initialized from castle {}",
-                 *ctx_.battle_target_castle);
+        LOG_INFO("BattleState: initialized from castle {}", *ctx_.battle_target_castle);
         ctx_.battle_target_castle.reset();  // Consume the target
     } else {
         battle_data_.init_battle();
+        battle_target_castle_ = 0;
     }
 
     init_done_ = true;
@@ -1252,6 +1741,10 @@ void BattleState::render() {
 
     ImGui::Separator();
     if (ImGui::Button("Return to Map", {-1, 0})) {
+        ctx_.battle_result = battle_data_.result();
+        if (battle_target_castle_ != 0) {
+            ctx_.battle_target_castle = battle_target_castle_;
+        }
         ctx_.request_pop = true;
     }
 
@@ -1303,6 +1796,10 @@ void BattleState::render() {
                 ImGui::Separator();
             }
             if (ImGui::Button("OK", {100, 0})) {
+                ctx_.battle_result = battle_data_.result();
+                if (battle_target_castle_ != 0) {
+                    ctx_.battle_target_castle = battle_target_castle_;
+                }
                 ImGui::CloseCurrentPopup();
                 show_settlement_ = false;
                 ctx_.request_pop = true;

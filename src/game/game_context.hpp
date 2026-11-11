@@ -21,8 +21,12 @@
 #include "castle_command.hpp"
 #include "save_system.hpp"
 #include <memory>
+#include <optional>
 
 namespace tensyoki {
+
+// Forward declaration of BattleResult (defined in battle.hpp)
+enum class BattleResult;
 
 class GameContext {
 public:
@@ -49,6 +53,7 @@ public:
         MainMenu,
         MapView,
         OfficerDetail,
+        CastleDetail,
         CastleCommand,
         Battle,
     };
@@ -61,6 +66,9 @@ public:
     
     // Target castle for battle (map-to-battle linkage)
     std::optional<uint32_t> battle_target_castle;
+
+    // Battle result for map integration (set by BattleState, consumed by MapViewState)
+    std::optional<BattleResult> battle_result;
 
     // Save system
     SaveSystem save_system;

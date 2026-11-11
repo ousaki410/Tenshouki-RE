@@ -78,21 +78,11 @@ find_package(Freetype REQUIRED)
 # Optional: Vulkan (for future use)
 find_package(Vulkan QUIET)
 
-# Fetch glad for OpenGL loading - use newer version compatible with CMake 4.x
-FetchContent_Declare(
-    glad
-    GIT_REPOSITORY https://github.com/Dav1dde/glad.git
-    GIT_TAG v0.1.36
-    GIT_SHALLOW TRUE
-)
-# Set CMake policy before FetchContent_MakeAvailable
-cmake_policy(SET CMP0155 NEW)
-# Configure GLAD for OpenGL 4.5 Core Profile
-set(GLAD_API "gl=4.5" CACHE STRING "OpenGL API version")
-set(GLAD_PROFILE "core" CACHE STRING "OpenGL profile")
-set(GLAD_GENERATOR "c" CACHE STRING "Language to generate the binding for")
-set(GLAD_SPEC "gl" CACHE STRING "Name of the spec")
-FetchContent_MakeAvailable(glad)
+# Local GLAD wrapper (no network fetch). System OpenGL provides all symbols.
+set(GLAD_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/thirdparty/glad")
+add_library(glad STATIC ${GLAD_SOURCE_DIR}/gl.cpp)
+target_include_directories(glad INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/thirdparty)
+set_target_properties(glad PROPERTIES LINKER_LANGUAGE CXX)
 
 # Optional: DirectXShaderCompiler (for HLSL→SPIR-V)
 # We'll provide a minimal fallback if not available

@@ -187,6 +187,9 @@ std::string SaveSystem::serialize(const GameSaveData& data) const {
         ss << "castle.is_player_owned=" << (castle.is_player_owned ? 1 : 0) << "\n";
         ss << "castle.is_capital=" << (castle.is_capital ? 1 : 0) << "\n";
         ss << "castle.auto_defense_bonus=" << castle.auto_defense_bonus << "\n";
+        ss << "castle.loyalty=" << castle.loyalty << "\n";
+        ss << "castle.tax_rate=" << castle.tax_rate << "\n";
+        ss << "castle.unrest=" << castle.unrest << "\n";
         ss << "castle.end\n";
     }
 
@@ -204,110 +207,131 @@ bool SaveSystem::deserialize(const std::string& json, GameSaveData& data) const 
 
         if (line == "end") break;
 
-        if (line.find("version=") == 0) {
-            data.version = std::stoi(line.substr(8));
-        } else if (line.find("date_year=") == 0) {
-            data.date_year = std::stoi(line.substr(10));
-        } else if (line.find("date_month=") == 0) {
-            data.date_month = std::stoi(line.substr(11));
-        } else if (line.find("date_day=") == 0) {
-            data.date_day = std::stoi(line.substr(9));
-        } else if (line.find("save_name=") == 0) {
-            data.save_name = line.substr(10);
-        } else if (line.find("player_castle_count=") == 0) {
-            data.player_castle_count = std::stoi(line.substr(20));
-        } else if (line.find("total_castles=") == 0) {
-            data.total_castles = std::stoi(line.substr(14));
-        } else if (line.find("castle_count=") == 0) {
-            int32_t count = std::stoi(line.substr(13));
-            data.castles.clear();
-            data.castles.reserve(count);
-        } else if (line.find("castle.index=") == 0) {
-            CastleData cd;
-            cd.index = std::stoi(line.substr(13));
-            data.castles.push_back(cd);
-        } else if (line.find("castle.name=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().name = line.substr(12);
+        try {
+            if (line.find("version=") == 0) {
+                data.version = std::stoi(line.substr(8));
+            } else if (line.find("date_year=") == 0) {
+                data.date_year = std::stoi(line.substr(10));
+            } else if (line.find("date_month=") == 0) {
+                data.date_month = std::stoi(line.substr(11));
+            } else if (line.find("date_day=") == 0) {
+                data.date_day = std::stoi(line.substr(9));
+            } else if (line.find("save_name=") == 0) {
+                data.save_name = line.substr(10);
+            } else if (line.find("player_castle_count=") == 0) {
+                data.player_castle_count = std::stoi(line.substr(20));
+            } else if (line.find("total_castles=") == 0) {
+                data.total_castles = std::stoi(line.substr(14));
+            } else if (line.find("castle_count=") == 0) {
+                int32_t count = std::stoi(line.substr(13));
+                data.castles.clear();
+                data.castles.reserve(count);
+            } else if (line.find("castle.index=") == 0) {
+                CastleData cd;
+                cd.index = std::stoi(line.substr(13));
+                data.castles.push_back(cd);
+            } else if (line.find("castle.name=") == 0) {
+                if (!data.castles.empty()) {
+                    if (line.size() > 12 && line[12] != '_') {
+                        data.castles.back().name = line.substr(12);
+                    }
+                }
+            } else if (line.find("castle.name_utf8=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().name_utf8 = line.substr(17);
+                }
+            } else if (line.find("castle.level=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().level = std::stoi(line.substr(13));
+                }
+            } else if (line.find("castle.defense=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().defense = std::stoi(line.substr(15));
+                }
+            } else if (line.find("castle.max_defense=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().max_defense = std::stoi(line.substr(19));
+                }
+            } else if (line.find("castle.garrison=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().garrison = std::stoi(line.substr(16));
+                }
+            } else if (line.find("castle.max_garrison=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().max_garrison = std::stoi(line.substr(20));
+                }
+            } else if (line.find("castle.gold=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().gold = std::stoi(line.substr(12));
+                }
+            } else if (line.find("castle.food=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().food = std::stoi(line.substr(12));
+                }
+            } else if (line.find("castle.has_wall=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().has_wall = (line.substr(16) == "1");
+                }
+            } else if (line.find("castle.has_barracks=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().has_barracks = (line.substr(20) == "1");
+                }
+            } else if (line.find("castle.has_storehouse=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().has_storehouse = (line.substr(22) == "1");
+                }
+            } else if (line.find("castle.has_market=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().has_market = (line.substr(18) == "1");
+                }
+            } else if (line.find("castle.lord_officer_id=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().lord_officer_id = std::stoi(line.substr(23));
+                }
+            } else if (line.find("castle.lord_name=") == 0) {
+                if (!data.castles.empty()) {
+                    if (line.size() > 17 && line[17] != '_') {
+                        data.castles.back().lord_name = line.substr(17);
+                    }
+                }
+            } else if (line.find("castle.lord_name_utf8=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().lord_name_utf8 = line.substr(22);
+                }
+            } else if (line.find("castle.region_id=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().region_id = std::stoi(line.substr(17));
+                }
+            } else if (line.find("castle.is_player_owned=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().is_player_owned = (line.substr(23) == "1");
+                }
+            } else if (line.find("castle.is_capital=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().is_capital = (line.substr(18) == "1");
+                }
+            } else if (line.find("castle.auto_defense_bonus=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().auto_defense_bonus = std::stoi(line.substr(26));
+                }
+            } else if (line.find("castle.loyalty=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().loyalty = std::stoi(line.substr(15));
+                }
+            } else if (line.find("castle.tax_rate=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().tax_rate = std::stoi(line.substr(16));
+                }
+            } else if (line.find("castle.unrest=") == 0) {
+                if (!data.castles.empty()) {
+                    data.castles.back().unrest = std::stoi(line.substr(14));
+                }
+            } else if (line.find("castle.end") == 0) {
+                // End of castle entry
             }
-        } else if (line.find("castle.name_utf8=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().name_utf8 = line.substr(17);
-            }
-        } else if (line.find("castle.level=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().level = std::stoi(line.substr(13));
-            }
-        } else if (line.find("castle.defense=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().defense = std::stoi(line.substr(15));
-            }
-        } else if (line.find("castle.max_defense=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().max_defense = std::stoi(line.substr(17));
-            }
-        } else if (line.find("castle.garrison=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().garrison = std::stoi(line.substr(16));
-            }
-        } else if (line.find("castle.max_garrison=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().max_garrison = std::stoi(line.substr(18));
-            }
-        } else if (line.find("castle.gold=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().gold = std::stoi(line.substr(12));
-            }
-        } else if (line.find("castle.food=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().food = std::stoi(line.substr(12));
-            }
-        } else if (line.find("castle.has_wall=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().has_wall = (line.substr(16) == "1");
-            }
-        } else if (line.find("castle.has_barracks=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().has_barracks = (line.substr(20) == "1");
-            }
-        } else if (line.find("castle.has_storehouse=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().has_storehouse = (line.substr(22) == "1");
-            }
-        } else if (line.find("castle.has_market=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().has_market = (line.substr(18) == "1");
-            }
-        } else if (line.find("castle.lord_officer_id=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().lord_officer_id = std::stoi(line.substr(23));
-            }
-        } else if (line.find("castle.lord_name=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().lord_name = line.substr(17);
-            }
-        } else if (line.find("castle.lord_name_utf8=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().lord_name_utf8 = line.substr(22);
-            }
-        } else if (line.find("castle.region_id=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().region_id = std::stoi(line.substr(17));
-            }
-        } else if (line.find("castle.is_player_owned=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().is_player_owned = (line.substr(23) == "1");
-            }
-        } else if (line.find("castle.is_capital=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().is_capital = (line.substr(18) == "1");
-            }
-        } else if (line.find("castle.auto_defense_bonus=") == 0) {
-            if (!data.castles.empty()) {
-                data.castles.back().auto_defense_bonus = std::stoi(line.substr(26));
-            }
-        } else if (line.find("castle.end") == 0) {
-            // End of castle entry
+        } catch (const std::exception& e) {
+            LOG_ERROR("SaveSystem: failed to parse line '{}': {}", line, e.what());
+            return false;
         }
     }
 

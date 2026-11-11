@@ -10,6 +10,11 @@
  *   - Ranged attacks: Archers can attack 2-3 tiles away
  *   - Battle event log: detailed combat history
  *   - Improved AI: prioritizes weak enemies, flanking tactics
+ *   - Terrain-based combat modifiers
+ *   - Status effects: Silence, Poison, Counterattack, Sleep, Slow, Weakness, ArmorBreak, Burn
+ *   - Skills: Heal, MoraleBoost, PowerStrike, Guard, Inspire, RainOfArrows, Silence, Poison, Counterattack, Sleep, Slow, Weakness, ArmorBreak, Burn, HealAll, InspireAll, TacticalRetreat
+ *   - Weather system: Clear, Rain, Snow, Fog
+ *   - Routing: Enemy units with low morale may flee
  */
 
 #include "battle.hpp"
@@ -328,9 +333,7 @@ void BattleStateData::init_from_castle(uint32_t castle_index, bool is_attacker) 
     int32_t cy = grid_height_ / 2;
     terrain_grid_[idx(cx, cy)].type = TerrainType::Castle;
 
-    // Note: In a full implementation, we'd look up castle data from SndataArchive
-    // and officer data to create realistic units. For now, create units based
-    // on castle index as a seed.
+    // Create units based on castle index as seed
     int32_t seed = static_cast<int32_t>(castle_index);
     int32_t garrison_size = 1 + (seed % 3);  // 1-3 defender units
     int32_t attacker_size = 2;  // Player always brings 2 units
@@ -343,8 +346,8 @@ void BattleStateData::init_from_castle(uint32_t castle_index, bool is_attacker) 
         u.name = "Defender " + std::to_string(i + 1);
         u.is_player = false;
         u.unit_type = static_cast<UnitType>(i % 3);
-        
-        // Scale stats by castle level (we don't have direct access, use seed)
+
+        // Scale stats by castle level
         int32_t level_bonus = seed % 5;
         u.hp = u.max_hp = 90 + level_bonus * 10;
         u.attack = 18 + level_bonus * 3;
@@ -353,14 +356,14 @@ void BattleStateData::init_from_castle(uint32_t castle_index, bool is_attacker) 
         u.move_left = 3;
         u.attack_range = (u.unit_type == UnitType::Archer) ? 3 : 1;
         u.morale = 50 + (seed % 20);
-        
+
         // Position around the castle
         u.grid_x = cx + (i - garrison_size / 2);
         u.grid_y = cy + 2;
         if (u.grid_x < 0) u.grid_x = 0;
         if (u.grid_x >= grid_width_) u.grid_x = grid_width_ - 1;
         if (u.grid_y >= grid_height_) u.grid_y = grid_height_ - 1;
-        
+
         units_.push_back(u);
     }
 
@@ -372,7 +375,7 @@ void BattleStateData::init_from_castle(uint32_t castle_index, bool is_attacker) 
         u.name = "Player Unit " + std::to_string(i + 1);
         u.is_player = true;
         u.unit_type = (i == 0) ? UnitType::Infantry : UnitType::Archer;
-        
+
         u.hp = u.max_hp = 120;
         u.attack = 25;
         u.defense = 15;
@@ -380,10 +383,10 @@ void BattleStateData::init_from_castle(uint32_t castle_index, bool is_attacker) 
         u.move_left = 3;
         u.attack_range = (u.unit_type == UnitType::Archer) ? 3 : 1;
         u.morale = 60;
-        
+
         u.grid_x = 3;
         u.grid_y = grid_height_ / 2 + i * 2;
-        
+
         units_.push_back(u);
     }
 
@@ -437,18 +440,10 @@ bool BattleStateData::is_position_empty(int32_t x, int32_t y) const {
     return terrain_grid_[idx(x, y)].unit_id == 0;
 }
 
-int32_t BattleStateData::movement_cost(int32_t x, int32_t y) const {
+int32_t BattleStateData::movement_cost(int32_t x, int32_t y, const BattleUnit* unit) const {
     if (!is_valid_position(x, y)) return 999;
     auto t = terrain_grid_[idx(x, y)].type;
-    int32_t cost = 1;
-    switch (t) {
-        case TerrainType::Plain:    cost = 1; break;
-        case TerrainType::Forest:   cost = 2; break;
-        case TerrainType::Mountain: cost = 3; break;
-        case TerrainType::Water:    cost = 4; break;
-        case TerrainType::Castle:   cost = 1; break;
-    }
-    // Apply weather movement penalty
+    int32_t cost = unit ? unit->get_terrain_move_cost(t) : 1;
     cost += weather_movement_penalty();
     return std::max(1, cost);
 }
@@ -484,8 +479,11 @@ int32_t BattleStateData::attack(BattleUnit& attacker, BattleUnit& defender) {
 
     int32_t eff_atk = attacker.effective_attack();
     int32_t eff_def = defender.effective_defense() +
-                      defense_bonus(defender.grid_x, defender.grid_y);
-    // Apply weather attack penalty
+                      defender.get_terrain_defense_bonus(
+                          terrain_grid_[idx(defender.grid_x, defender.grid_y)].type);
+    int32_t atk_terrain_bonus = attacker.get_terrain_attack_bonus(
+        terrain_grid_[idx(attacker.grid_x, attacker.grid_y)].type);
+    eff_atk += atk_terrain_bonus;
     eff_atk += weather_attack_penalty();
     int32_t dmg = roll_damage(eff_atk, eff_def);
     defender.hp = std::max(0, defender.hp - dmg);
@@ -507,7 +505,8 @@ int32_t BattleStateData::attack(BattleUnit& attacker, BattleUnit& defender) {
         if (dist <= 1) {
             int32_t cdmg = roll_damage(defender.effective_attack(),
                                        attacker.effective_defense() +
-                                       defense_bonus(attacker.grid_x, attacker.grid_y));
+                                       defender.get_terrain_defense_bonus(
+                                           terrain_grid_[idx(attacker.grid_x, attacker.grid_x)].type));
             attacker.hp = std::max(0, attacker.hp - cdmg);
             add_event(fmt::format("{} counterattacks {} for {} dmg!",
                                   defender.name, attacker.name, cdmg),
@@ -555,7 +554,11 @@ int32_t BattleStateData::ranged_attack(BattleUnit& attacker,
     // Ranged attacks do slightly less damage
     int32_t eff_atk = attacker.effective_attack() - 5;
     int32_t eff_def = defender.effective_defense() +
-                      defense_bonus(defender.grid_x, defender.grid_y);
+                      defender.get_terrain_defense_bonus(
+                          terrain_grid_[idx(defender.grid_x, defender.grid_y)].type);
+    int32_t atk_terrain_bonus = attacker.get_terrain_attack_bonus(
+        terrain_grid_[idx(attacker.grid_x, attacker.grid_y)].type);
+    eff_atk += atk_terrain_bonus;
     int32_t dmg = roll_damage(eff_atk, eff_def);
     defender.hp = std::max(0, defender.hp - dmg);
     attacker.has_acted = true;
@@ -762,11 +765,18 @@ void BattleStateData::change_weather() {
     weather_turns_ = 2 + (rng() % 3);  // Weather lasts 2-4 turns
 
     const char* weather_names[] = {"Clear", "Rain", "Snow", "Fog"};
-    LOG_INFO("BattleStateData: weather changed to %s for %d turns",
+    LOG_INFO("BattleStateData: weather changed to {} for {} turns",
              weather_names[weather_], weather_turns_);
 
     add_event(fmt::format("Weather changed to {}!", weather_names[weather_]),
               true, 0, false);
+}
+
+void BattleStateData::set_weather(int32_t w) {
+    weather_ = w;
+    weather_turns_ = 1;
+    const char* weather_names[] = {"Clear", "Rain", "Snow", "Fog"};
+    LOG_INFO("BattleStateData: weather set to {}", weather_names[w]);
 }
 
 int32_t BattleStateData::weather_movement_penalty() const {
@@ -799,6 +809,42 @@ bool BattleStateData::weather_blocks_vision() const {
     return weather_ == 3;  // Fog blocks vision
 }
 
+// Routing system - check if unit should rout due to low morale
+bool BattleStateData::unit_rout_check(BattleUnit& unit) {
+    // Units with very low morale (below 20) have a chance to rout
+    if (unit.morale >= 20) return false;
+
+    // Lower morale = higher rout chance
+    int32_t rout_chance = (20 - unit.morale) * 2;  // Up to 40% at morale 0
+
+    std::mt19937 rng(unit.id * 1000 + unit.morale);
+    std::uniform_int_distribution<int> dist(0, 100);
+
+    if (dist(rng) < rout_chance) {
+        return true;  // Unit routs
+    }
+    return false;
+}
+
+void BattleStateData::process_unit_rout(BattleUnit& unit) {
+    unit.is_routed = true;
+    unit.rout_turns_remaining = 3;  // Routed for 3 turns
+    unit.move_left = 0;  // Cannot act this turn
+    unit.has_acted = true;
+
+    add_event(fmt::format("{} ROUTED! Fleeing the battlefield!", unit.name),
+              unit.is_player, 0, false);
+
+    LOG_INFO("BattleStateData: unit {} routed due to low morale", unit.name);
+}
+
+bool BattleStateData::is_unit_routed(uint32_t unit_id) const {
+    for (const auto& u : units_) {
+        if (u.id == unit_id) return u.is_routed;
+    }
+    return false;
+}
+
 void BattleStateData::next_turn() {
     is_player_turn_ = !is_player_turn_;
 
@@ -816,6 +862,10 @@ void BattleStateData::next_turn() {
             // Sleeping units cannot act this turn
             if (u.is_sleeping()) {
                 u.has_acted = true;
+            }
+            // Check for rout due to low morale
+            if (unit_rout_check(u)) {
+                process_unit_rout(u);
             }
         }
     }
@@ -1196,7 +1246,7 @@ bool BattleStateData::is_in_skill_range(int32_t ax, int32_t ay,
                                          int32_t tx, int32_t ty,
                                          const BattleSkill& skill) const {
     int32_t dist = std::abs(ax - tx) + std::abs(ay - ty);
-    return dist >= 1 && dist <= skill.range;
+    return dist >= 0 && dist <= skill.range;
 }
 
 // Improved AI: prioritize weak enemies, use flanking, use skills when possible
@@ -1292,7 +1342,7 @@ void BattleStateData::ai_turn() {
             BattleUnit* weakest = targets[0];
             auto path = find_path(unit.grid_x, unit.grid_y,
                                   weakest->grid_x, weakest->grid_y,
-                                  unit.move_left);
+                                  unit.move_left, &unit);
             if (!path.empty()) {
                 auto [nx, ny] = path[0];
                 auto& old_cell = get_terrain(unit.grid_x, unit.grid_y);
@@ -1302,7 +1352,7 @@ void BattleStateData::ai_turn() {
                 auto& new_cell = get_terrain(unit.grid_x, unit.grid_y);
                 new_cell.unit_id = unit.id;
 
-                int32_t cost = movement_cost(nx, ny);
+                int32_t cost = movement_cost(nx, ny, &unit);
                 unit.move_left -= cost;
 
                 // Check if now in attack range
@@ -1327,7 +1377,7 @@ void BattleStateData::ai_turn() {
 
 std::vector<std::pair<int32_t, int32_t>> BattleStateData::find_path(
     int32_t sx, int32_t sy, int32_t gx, int32_t gy,
-    int32_t max_cost) const {
+    int32_t max_cost, const BattleUnit* unit) const {
     // Simple A* pathfinding
     struct Node {
         int32_t x, y;
@@ -1384,7 +1434,7 @@ std::vector<std::pair<int32_t, int32_t>> BattleStateData::find_path(
             int32_t ny = curr.y + dy[i];
             if (!is_valid_position(nx, ny)) continue;
             if (!is_position_empty(nx, ny)) continue;  // Can't move into occupied cell
-            int32_t cost = movement_cost(nx, ny);
+            int32_t cost = movement_cost(nx, ny, unit);
             if (curr.g + cost > max_cost) continue;
 
             int32_t new_g = curr.g + cost;

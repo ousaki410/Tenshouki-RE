@@ -167,6 +167,7 @@ public:
 
     /// Request flags set by UI buttons, checked by MapViewState
     bool request_castle_command = false;
+    bool request_castle_detail = false;
     bool request_battle = false;
 
     /// Campaign: castle selected for attack (set by UI)
@@ -176,6 +177,7 @@ public:
     /// Clear request flags (call after processing in MapViewState)
     void clear_requests() {
         request_castle_command = false;
+        request_castle_detail = false;
         request_battle = false;
     }
 

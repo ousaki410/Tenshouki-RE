@@ -129,6 +129,10 @@ struct BattleUnit {
     // Status effects currently applied to this unit
     std::vector<StatusEffect> status_effects;
 
+    // Routing state - unit is fleeing and cannot be controlled
+    bool is_routed = false;
+    int32_t rout_turns_remaining = 0;  // Turns remaining in rout state
+
     bool is_dead() const { return hp <= 0; }
 
     // Check if unit has a specific status effect
@@ -174,29 +178,32 @@ struct BattleUnit {
         return has_status(StatusEffect::Type::Burn);
     }
 
-    // Check if unit can act (not sleeping, not dead)
+    // Check if unit can act (not sleeping, not dead, not routed)
     bool can_act() const {
-        return !is_dead() && !is_sleeping();
+        return !is_dead() && !is_sleeping() && !is_routed;
     }
 
-    // Get effective attack with morale and weakness modifiers
+    // Get effective attack with morale, weakness, routed modifiers
     int32_t effective_attack() const {
         int32_t atk = attack + (morale - 50) / 10;
         if (is_weakened()) atk = atk * 2 / 3;  // Weakness reduces attack by 1/3
+        if (is_routed) atk = atk / 2;          // Routed units fight poorly
         return std::max(0, atk);
     }
 
-    // Get effective defense with morale and armor break modifiers
+    // Get effective defense with morale, armor break, routed modifiers
     int32_t effective_defense() const {
         int32_t def = defense + (morale - 50) / 10;
         if (is_armor_broken()) def = def * 2 / 3;  // ArmorBreak reduces defense by 1/3
+        if (is_routed) def = def / 2;            // Routed units defend poorly
         return std::max(0, def);
     }
 
-    // Get effective movement with slow modifier
+    // Get effective movement with slow, routed modifiers
     int32_t effective_move() const {
         int32_t mv = move;
         if (is_slowed()) mv = mv / 2;  // Slow halves movement
+        if (is_routed) mv = mv * 2;  // Routed units move faster (fleeing)
         return std::max(1, mv);
     }
 
@@ -212,6 +219,50 @@ struct BattleUnit {
 
     // Get available skills based on unit type and level
     std::vector<BattleSkill> get_available_skills() const;
+
+    /// Terrain-based combat modifiers for unit type vs terrain
+    /// terrain_attack_bonus[terrain_type][unit_type] - attack modifier
+    /// terrain_defense_bonus[terrain_type][unit_type] - defense modifier
+    /// terrain_move_cost[terrain_type][unit_type] - movement cost modifier
+    static constexpr int32_t terrain_attack_bonus[5][3] = {
+        {  0,   0,   0 },   // Plain: no modifier
+        { -1,  -2,  +2 },   // Forest: archer bonus, cavalry penalty
+        { -2,  -1,  -1 },   // Mountain: all penalized, cavalry least
+        { -1,  -3,  -2 },   // Water: all penalized, cavalry most
+        { +2,   0,   0 },   // Castle: infantry bonus (defensive position)
+    };
+    static constexpr int32_t terrain_defense_bonus[5][3] = {
+        {  0,   0,   0 },   // Plain: no modifier
+        { +2,   0,  +1 },   // Forest: infantry and archer bonus
+        { -1,  -2,  -1 },   // Mountain: all penalized
+        { -2,  -3,  -2 },   // Water: all penalized
+        { +3,   0,   0 },   // Castle: infantry bonus (defensive position)
+    };
+    static constexpr int32_t terrain_move_cost[5][3] = {
+        {  1,   1,   1 },   // Plain: normal movement
+        {  2,   3,   2 },   // Forest: cavalry slowed most
+        {  3,   2,   4 },   // Mountain: archer slowed most
+        {  4,   5,   3 },   // Water: all slowed, cavalry most
+        {  1,   1,   1 },   // Castle: normal movement
+    };
+
+    /// Get terrain-based attack bonus for this unit type on given terrain
+    int32_t get_terrain_attack_bonus(TerrainType terrain) const {
+        return terrain_attack_bonus[static_cast<int>(terrain)]
+                                  [static_cast<int>(unit_type)];
+    }
+
+    /// Get terrain-based defense bonus for this unit type on given terrain
+    int32_t get_terrain_defense_bonus(TerrainType terrain) const {
+        return terrain_defense_bonus[static_cast<int>(terrain)]
+                                  [static_cast<int>(unit_type)];
+    }
+
+    /// Get terrain movement cost for this unit type on given terrain
+    int32_t get_terrain_move_cost(TerrainType terrain) const {
+        return terrain_move_cost[static_cast<int>(terrain)]
+                                  [static_cast<int>(unit_type)];
+    }
 };
 
 /// Single terrain cell on the battlefield
@@ -273,7 +324,7 @@ public:
     bool is_position_empty(int32_t x, int32_t y) const;
 
     // Get movement cost for entering a cell
-    int32_t movement_cost(int32_t x, int32_t y) const;
+    int32_t movement_cost(int32_t x, int32_t y, const BattleUnit* unit = nullptr) const;
 
     // Get defense bonus for a unit at a position
     int32_t defense_bonus(int32_t x, int32_t y) const;
@@ -341,7 +392,8 @@ public:
     // Pathfinding: A* from start to goal, returns path (excluding start)
     std::vector<std::pair<int32_t, int32_t>> find_path(int32_t sx, int32_t sy,
                                                        int32_t gx, int32_t gy,
-                                                       int32_t max_cost) const;
+                                                       int32_t max_cost,
+                                                       const BattleUnit* unit = nullptr) const;
 
     // Check if a unit can reach a target position within remaining movement
     bool can_reach(int32_t sx, int32_t sy, int32_t tx, int32_t ty,
@@ -375,6 +427,7 @@ private:
                    int32_t damage = 0, bool is_skill = false);
 
     // Check win conditions and build settlement
+public:
     void check_win_conditions();
 
     // Build settlement data after battle ends
@@ -398,12 +451,18 @@ private:
 
     // Weather effects
     void change_weather();
+    void set_weather(int32_t w);  // For testing: force specific weather
     int32_t weather_movement_penalty() const;
     int32_t weather_attack_penalty() const;
     bool weather_blocks_vision() const;
 
     // AI helper: get mutable unit by ID
     BattleUnit* get_unit_by_id(uint32_t id);
+
+    // Routing system
+    bool unit_rout_check(BattleUnit& unit);  // Check if unit should rout due to low morale
+    void process_unit_rout(BattleUnit& unit); // Handle rout effects
+    bool is_unit_routed(uint32_t unit_id) const; // Check if unit is routed
 };
 
 } // namespace tensyoki

@@ -49,7 +49,7 @@ private:
     int last_month_ = -1;        // Track month for resource production
 };
 
-/// Officer detail state
+/// Officer detail state: view and edit officer information
 class OfficerDetailState : public GameState {
 public:
     explicit OfficerDetailState(GameContext& ctx);
@@ -61,6 +61,15 @@ public:
 private:
     GameContext& ctx_;
     int selected_officer_ = -1;
+    std::string search_filter_;
+    bool show_attr_editor_ = false;
+
+    // Find the castle this officer is assigned as lord to (if any)
+    const CastleData* find_officer_castle(uint16_t officer_id) const;
+    // Get a human-readable name for an attribute byte offset
+    const char* get_attr_name(size_t offset) const;
+    // Render the editable attribute editor panel
+    void render_attr_editor(Officer& officer);
 };
 
 /// Castle command state: manage castle facilities, troops, officers
@@ -76,6 +85,20 @@ private:
     GameContext& ctx_;
     int selected_castle_ = -1;
     int selected_tab_ = 0;  // 0=Recruit, 1=Build, 2=Officer, 3=Upgrade
+};
+
+/// Castle detail state: read-only detailed castle information panel
+class CastleDetailState : public GameState {
+public:
+    explicit CastleDetailState(GameContext& ctx);
+    void enter() override;
+    bool update(float dt) override;
+    void render() override;
+    GameStateID id() const override { return GameStateID::CastleDetail; }
+
+private:
+    GameContext& ctx_;
+    uint32_t selected_castle_ = 0;
 };
 
 /// Battle state: tactical combat layer
@@ -106,6 +129,8 @@ private:
     std::vector<std::pair<int32_t, int32_t>> skill_range_cells_;
     // Show battle settlement dialog
     bool show_settlement_ = false;
+    // Target castle index from map (for post-battle map integration)
+    uint32_t battle_target_castle_ = 0;
 };
 
 } // namespace tensyoki

@@ -666,6 +666,11 @@ void MapView::render_ui(Renderer& renderer) {
             }
 
             ImGui::SameLine();
+            if (ImGui::Button("View Details", {-1, 0})) {
+                request_castle_detail = true;
+            }
+
+            ImGui::SameLine();
             if (ImGui::Button("Start Battle", {-1, 0})) {
                 request_battle = true;
             }

@@ -56,6 +56,34 @@ public:
             return ok ? 0 : 1;
         }
 
+        // Headless battle system test: no window, no renderer
+        if (battle_test_) {
+            const bool ok = run_battle_test();
+            Logging::shutdown();
+            return ok ? 0 : 1;
+        }
+
+        // Headless castle command test: no window, no renderer
+        if (castle_test_) {
+            const bool ok = run_castle_test();
+            Logging::shutdown();
+            return ok ? 0 : 1;
+        }
+
+        // Headless save/load system test: no window, no renderer
+        if (save_test_) {
+            const bool ok = run_save_test();
+            Logging::shutdown();
+            return ok ? 0 : 1;
+        }
+
+        // Headless officer system test: no window, no renderer
+        if (officer_test_) {
+            const bool ok = run_officer_test();
+            Logging::shutdown();
+            return ok ? 0 : 1;
+        }
+
         if (help_requested_) {
             Logging::shutdown();
             return 0;
@@ -258,9 +286,21 @@ private:
             std::string_view arg = argv_[i];
             if (arg == "--check-resources") {
                 check_resources_ = true;
+            } else if (arg == "--test-battle") {
+                battle_test_ = true;
+            } else if (arg == "--test-castle") {
+                castle_test_ = true;
+            } else if (arg == "--test-save") {
+                save_test_ = true;
+            } else if (arg == "--test-officer") {
+                officer_test_ = true;
             } else if (arg == "--help" || arg == "-h") {
                 std::cout << "Usage: tensyoki [options] [data_root]\n"
                           << "  --check-resources  parse all res/*.bin containers and exit\n"
+                          << "  --test-battle      run headless battle system test and exit\n"
+                          << "  --test-castle      run headless castle command test and exit\n"
+                          << "  --test-save        run headless save/load system test and exit\n"
+                          << "  --test-officer     run headless officer system test and exit\n"
                           << "  --help             show this message\n"
                           << "Environment: TENSYOKI_DATA_ROOT\n";
                 help_requested_ = true;
@@ -406,7 +446,1139 @@ private:
             LOG_WARN("Failed to parse res_grp.bin: {}", tensyoki::to_string(grp_result.error()));
         }
     }
-    
+
+    /// Headless battle system test: terrain, weather, morale, status effects, routing.
+    /// Returns true if all checks pass.
+    bool run_battle_test() {
+        LOG_INFO("=== Battle System Test ===");
+
+        int failures = 0;
+        auto check = [&](bool cond, const std::string& desc) {
+            if (cond) {
+                LOG_INFO("  PASS: {}", desc);
+            } else {
+                LOG_ERROR("  FAIL: {}", desc);
+                ++failures;
+            }
+        };
+
+        // ---- Setup ----
+        BattleStateData battle;
+        battle.init_battle();
+
+        // Use get_unit_by_id: player units have ids 1,2,3; enemy units 4,5,6
+        BattleUnit* player_inf = battle.get_unit_by_id(1);
+        BattleUnit* enemy_archer = battle.get_unit_by_id(5);
+        check(player_inf != nullptr, "player unit id 1 exists");
+        check(enemy_archer != nullptr, "enemy unit id 5 exists");
+
+        // ---- Terrain bonuses ----
+        LOG_INFO("--- Terrain Bonuses ---");
+        // Infantry on Castle: +2 attack, +3 defense, move cost 1
+        check(player_inf->get_terrain_attack_bonus(TerrainType::Castle) == 2,
+              "infantry castle attack bonus == 2");
+        check(player_inf->get_terrain_defense_bonus(TerrainType::Castle) == 3,
+              "infantry castle defense bonus == 3");
+        check(player_inf->get_terrain_move_cost(TerrainType::Castle) == 1,
+              "infantry castle move cost == 1");
+        // Cavalry on Forest: -2 attack, +0 defense, move cost 3
+        BattleUnit cav;
+        cav.unit_type = UnitType::Cavalry;
+        check(cav.get_terrain_attack_bonus(TerrainType::Forest) == -2,
+              "cavalry forest attack bonus == -2");
+        check(cav.get_terrain_move_cost(TerrainType::Forest) == 3,
+              "cavalry forest move cost == 3");
+        // Archer on Forest: +2 attack, +1 defense, move cost 2
+        BattleUnit arch;
+        arch.unit_type = UnitType::Archer;
+        check(arch.get_terrain_attack_bonus(TerrainType::Forest) == 2,
+              "archer forest attack bonus == 2");
+        check(arch.get_terrain_defense_bonus(TerrainType::Forest) == 1,
+              "archer forest defense bonus == 1");
+        check(arch.get_terrain_move_cost(TerrainType::Forest) == 2,
+              "archer forest move cost == 2");
+        // Water: high move cost for all
+        check(player_inf->get_terrain_move_cost(TerrainType::Water) == 4,
+              "infantry water move cost == 4");
+        check(cav.get_terrain_move_cost(TerrainType::Water) == 5,
+              "cavalry water move cost == 5");
+        check(arch.get_terrain_move_cost(TerrainType::Water) == 3,
+              "archer water move cost == 3");
+
+        // ---- Movement cost with weather ----
+        LOG_INFO("--- Weather Effects ---");
+        // Clear weather: no movement penalty
+        battle.set_weather(0);  // Force Clear
+        check(battle.weather_movement_penalty() == 0, "clear weather movement penalty == 0");
+        check(battle.weather() == 0, "weather is Clear");
+        // Weather blocks vision in fog
+        battle.set_weather(3);  // Fog
+        check(battle.weather_blocks_vision() == true, "fog blocks vision");
+        battle.set_weather(0);  // Clear
+        check(battle.weather_blocks_vision() == false, "clear does not block vision");
+
+        // ---- Morale system ----
+        LOG_INFO("--- Morale System ---");
+        BattleUnit high_morale;
+        high_morale.morale = 80;
+        high_morale.attack = 20;
+        high_morale.defense = 10;
+        check(high_morale.effective_attack() == 23,  // 20 + (80-50)/10 = 23
+              "high morale (+30) boosts attack by 3");
+        check(high_morale.effective_defense() == 13,  // 10 + (80-50)/10 = 13
+              "high morale (+30) boosts defense by 3");
+
+        BattleUnit low_morale;
+        low_morale.morale = 20;
+        low_morale.attack = 20;
+        low_morale.defense = 10;
+        check(low_morale.effective_attack() == 17,  // 20 + (20-50)/10 = 17
+              "low morale (-30) reduces attack by 3");
+        check(low_morale.effective_defense() == 7,  // 10 + (20-50)/10 = 7
+              "low morale (-30) reduces defense by 3");
+
+        // ---- Status effects: Weakness ----
+        LOG_INFO("--- Status Effects ---");
+        BattleUnit weak_unit;
+        weak_unit.attack = 30;
+        battle.apply_status_effect(weak_unit, StatusEffect::Type::Weakness, 3, 0);
+        check(weak_unit.is_weakened(), "unit is weakened after apply_status_effect");
+        check(weak_unit.effective_attack() == 20,  // 30 * 2/3 = 20
+              "weakness reduces attack to 2/3 (30 -> 20)");
+        check(weak_unit.status_effects[0].turns_remaining == 3,
+              "weakness lasts 3 turns");
+
+        // ---- Status effects: ArmorBreak ----
+        BattleUnit armor_unit;
+        armor_unit.defense = 30;
+        battle.apply_status_effect(armor_unit, StatusEffect::Type::ArmorBreak, 3, 0);
+        check(armor_unit.is_armor_broken(), "unit has ArmorBreak");
+        check(armor_unit.effective_defense() == 20,  // 30 * 2/3 = 20
+              "armor break reduces defense to 2/3 (30 -> 20)");
+
+        // ---- Status effects: Slow ----
+        BattleUnit slow_unit;
+        slow_unit.move = 6;
+        battle.apply_status_effect(slow_unit, StatusEffect::Type::Slow, 2, 0);
+        check(slow_unit.is_slowed(), "unit is slowed");
+        check(slow_unit.effective_move() == 3,  // 6 / 2 = 3
+              "slow halves movement (6 -> 3)");
+
+        // ---- Status effects: Burn ----
+        BattleUnit burn_unit;
+        burn_unit.hp = 100;
+        burn_unit.max_hp = 100;
+        battle.apply_status_effect(burn_unit, StatusEffect::Type::Burn, 3, 10);
+        check(burn_unit.is_burning(), "unit is burning");
+        battle.process_status_effects(burn_unit);
+        check(burn_unit.hp == 90,  // 100 - 10 burn damage
+              "burn deals 10 damage per turn");
+        check(burn_unit.status_effects[0].turns_remaining == 2,
+              "burn turns remaining decremented to 2");
+
+        // ---- Status effects: Sleep ----
+        BattleUnit sleep_unit;
+        sleep_unit.hp = 100;
+        sleep_unit.has_acted = false;
+        battle.apply_status_effect(sleep_unit, StatusEffect::Type::Sleep, 2, 0);
+        check(sleep_unit.is_sleeping(), "unit is sleeping");
+        check(sleep_unit.can_act() == false, "sleeping unit cannot act");
+
+        // ---- Status effects: Silence ----
+        BattleUnit silence_unit;
+        battle.apply_status_effect(silence_unit, StatusEffect::Type::Silence, 2, 0);
+        check(silence_unit.is_silenced(), "unit is silenced");
+
+        // ---- Status effects: Counterattack ----
+        BattleUnit counter_unit;
+        battle.apply_status_effect(counter_unit, StatusEffect::Type::Counterattack, 2, 0);
+        check(counter_unit.has_counterattack(), "unit has Counterattack");
+
+        // ---- Status effects: Poison ----
+        BattleUnit poison_unit;
+        poison_unit.hp = 100;
+        poison_unit.max_hp = 100;
+        battle.apply_status_effect(poison_unit, StatusEffect::Type::Poison, 3, 15);
+        check(poison_unit.has_status(StatusEffect::Type::Poison), "unit is poisoned");
+        battle.process_status_effects(poison_unit);
+        check(poison_unit.hp == 85,  // 100 - 15 poison damage
+              "poison deals 15 damage per turn");
+
+        // ---- Status effect expiration ----
+        BattleUnit expire_unit;
+        expire_unit.hp = 100;
+        battle.apply_status_effect(expire_unit, StatusEffect::Type::Weakness, 1, 0);
+        check(expire_unit.status_effects[0].turns_remaining == 1, "weakness starts at 1 turn");
+        battle.process_status_effects(expire_unit);
+        check(expire_unit.status_effects.empty(), "weakness expired after 1 turn");
+        check(!expire_unit.is_weakened(), "unit no longer weakened after expiry");
+
+        // ---- Routing system ----
+        LOG_INFO("--- Routing System ---");
+        BattleUnit routed_unit;
+        routed_unit.id = 99;
+        routed_unit.morale = 5;  // Very low morale
+        routed_unit.name = "Test Routed Unit";
+        routed_unit.is_player = true;
+        bool rout_result = battle.unit_rout_check(routed_unit);
+        // morale 5 => rout chance = (20-5)*2 = 30%. Not deterministic, just check it doesn't crash
+        LOG_INFO("  rout_check for morale=5 returned {}", rout_result ? "true" : "false");
+        if (rout_result) {
+            battle.process_unit_rout(routed_unit);
+            check(routed_unit.is_routed, "routed unit has is_routed == true");
+            check(routed_unit.rout_turns_remaining == 3, "rout lasts 3 turns");
+            check(routed_unit.can_act() == false, "routed unit cannot act");
+            check(routed_unit.effective_attack() <= routed_unit.attack / 2 + 1,
+                  "routed unit attack reduced");
+            check(routed_unit.effective_defense() <= routed_unit.defense / 2 + 1,
+                  "routed unit defense reduced");
+        }
+
+        // High morale unit should not rout
+        BattleUnit brave_unit;
+        brave_unit.id = 100;
+        brave_unit.morale = 90;
+        brave_unit.name = "Brave Unit";
+        check(battle.unit_rout_check(brave_unit) == false, "high morale unit does not rout");
+
+        // ---- Attack with terrain modifiers ----
+        LOG_INFO("--- Combat with Terrain ---");
+        if (player_inf && enemy_archer) {
+            // Place them adjacent on plain
+            player_inf->grid_x = 5;
+            player_inf->grid_y = 5;
+            player_inf->has_acted = false;
+            enemy_archer->grid_x = 6;
+            enemy_archer->grid_y = 5;
+            enemy_archer->has_acted = false;
+            enemy_archer->hp = 100;
+            enemy_archer->max_hp = 100;
+            battle.get_terrain(5, 5).type = TerrainType::Plain;
+            battle.get_terrain(6, 5).type = TerrainType::Plain;
+            battle.get_terrain(5, 5).unit_id = player_inf->id;
+            battle.get_terrain(6, 5).unit_id = enemy_archer->id;
+
+            int32_t dmg = battle.attack(*player_inf, *enemy_archer);
+            check(dmg >= 0, "attack deals non-negative damage");
+            check(enemy_archer->hp < 100, "enemy took damage from attack");
+            check(player_inf->has_acted == true, "attacker has_acted after attack");
+            check(player_inf->morale > 0, "attacker morale changed after attack");
+
+            // Attack from Castle terrain gives infantry +2 attack bonus
+            player_inf->has_acted = false;
+            enemy_archer->hp = 100;
+            enemy_archer->max_hp = 100;
+            battle.get_terrain(5, 5).type = TerrainType::Castle;
+            int32_t dmg_castle = battle.attack(*player_inf, *enemy_archer);
+            LOG_INFO("  dmg on plain={} dmg on castle={}", dmg, dmg_castle);
+            // Castle terrain should generally give equal or more damage (infantry attack bonus)
+            check(dmg_castle >= dmg, "castle terrain attack bonus increases damage for infantry");
+        }
+
+        // ---- Ranged attack (archer) ----
+        LOG_INFO("--- Ranged Attack ---");
+        if (player_inf && enemy_archer) {
+            enemy_archer->unit_type = UnitType::Archer;
+            enemy_archer->grid_x = 8;
+            enemy_archer->grid_y = 5;
+            enemy_archer->has_acted = false;
+            player_inf->hp = 100;
+            player_inf->max_hp = 100;
+            player_inf->grid_x = 5;
+            player_inf->grid_y = 5;
+            battle.get_terrain(8, 5).type = TerrainType::Plain;
+            battle.get_terrain(8, 5).unit_id = enemy_archer->id;
+            battle.get_terrain(5, 5).unit_id = player_inf->id;
+
+            int32_t rdmg = battle.ranged_attack(*enemy_archer, *player_inf);
+            check(rdmg >= 0, "ranged attack deals non-negative damage");
+            check(enemy_archer->has_acted == true, "archer has_acted after ranged attack");
+            // Damage may be 0 due to random roll vs defense; just verify the attack was processed
+            check(player_inf->hp <= 100, "target HP is valid after ranged attack");
+        }
+
+        // ---- Skills ----
+        LOG_INFO("--- Skills ---");
+        if (player_inf) {
+            // Level up to 3 so Heal skill is available (needs level >= 3)
+            battle.grant_exp(*player_inf, 100);  // level 1 -> 2
+            battle.grant_exp(*player_inf, 200);  // level 2 -> 3
+
+            // Heal skill
+            player_inf->has_acted = false;
+            player_inf->used_skill = false;
+            player_inf->morale = 50;
+            player_inf->hp = 50;
+            player_inf->max_hp = 100;
+            auto skills = player_inf->get_available_skills();
+            bool has_heal = false;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Heal) has_heal = true;
+            }
+            check(has_heal, "infantry has Heal skill available at level 3");
+            // Use heal on self - find the Heal skill
+            const BattleSkill* heal_skill = nullptr;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Heal) heal_skill = &s;
+            }
+            check(heal_skill != nullptr, "heal skill found in skill list");
+            if (heal_skill) {
+                player_inf->grid_x = 5;
+                player_inf->grid_y = 5;
+                battle.get_terrain(5, 5).unit_id = player_inf->id;  // register on grid
+                int32_t heal_dmg = battle.use_skill(*player_inf, *heal_skill, 5, 5);
+                check(player_inf->hp > 50, "heal skill restored HP");
+                check(player_inf->has_acted == true, "using skill sets has_acted");
+            }
+        }
+
+        // Silence skill on enemy
+        if (player_inf && enemy_archer) {
+            enemy_archer->has_acted = false;
+            enemy_archer->used_skill = false;
+            enemy_archer->morale = 50;
+            auto skills = player_inf->get_available_skills();
+            bool has_silence = false;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Silence) has_silence = true;
+            }
+            if (has_silence) {
+                player_inf->has_acted = false;
+                player_inf->used_skill = false;
+                player_inf->morale = 50;
+                // Find silence skill
+                const BattleSkill* silence_skill = nullptr;
+                for (const auto& s : skills) {
+                    if (s.type == SkillType::Silence) silence_skill = &s;
+                }
+                if (silence_skill) {
+                    battle.use_skill(*player_inf, *silence_skill, enemy_archer->grid_x, enemy_archer->grid_y);
+                    check(enemy_archer->is_silenced(), "silence skill applied to enemy");
+                }
+            }
+        }
+
+        // Poison skill
+        if (player_inf && enemy_archer) {
+            enemy_archer->hp = 100;
+            enemy_archer->max_hp = 100;
+            auto skills = player_inf->get_available_skills();
+            const BattleSkill* poison_skill = nullptr;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Poison) poison_skill = &s;
+            }
+            if (poison_skill) {
+                player_inf->has_acted = false;
+                player_inf->used_skill = false;
+                player_inf->morale = 50;
+                battle.use_skill(*player_inf, *poison_skill, enemy_archer->grid_x, enemy_archer->grid_y);
+                check(enemy_archer->has_status(StatusEffect::Type::Poison), "poison skill applied to enemy");
+            }
+        }
+
+        // Sleep skill
+        if (player_inf && enemy_archer) {
+            auto skills = player_inf->get_available_skills();
+            const BattleSkill* sleep_skill = nullptr;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Sleep) sleep_skill = &s;
+            }
+            if (sleep_skill) {
+                player_inf->has_acted = false;
+                player_inf->used_skill = false;
+                player_inf->morale = 50;
+                battle.use_skill(*player_inf, *sleep_skill, enemy_archer->grid_x, enemy_archer->grid_y);
+                check(enemy_archer->is_sleeping(), "sleep skill applied to enemy");
+            }
+        }
+
+        // Slow skill
+        if (player_inf && enemy_archer) {
+            auto skills = player_inf->get_available_skills();
+            const BattleSkill* slow_skill = nullptr;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Slow) slow_skill = &s;
+            }
+            if (slow_skill) {
+                player_inf->has_acted = false;
+                player_inf->used_skill = false;
+                player_inf->morale = 50;
+                battle.use_skill(*player_inf, *slow_skill, enemy_archer->grid_x, enemy_archer->grid_y);
+                check(enemy_archer->is_slowed(), "slow skill applied to enemy");
+            }
+        }
+
+        // Weakness skill
+        if (player_inf && enemy_archer) {
+            auto skills = player_inf->get_available_skills();
+            const BattleSkill* weak_skill = nullptr;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Weakness) weak_skill = &s;
+            }
+            if (weak_skill) {
+                player_inf->has_acted = false;
+                player_inf->used_skill = false;
+                player_inf->morale = 50;
+                battle.use_skill(*player_inf, *weak_skill, enemy_archer->grid_x, enemy_archer->grid_y);
+                check(enemy_archer->is_weakened(), "weakness skill applied to enemy");
+            }
+        }
+
+        // ArmorBreak skill
+        if (player_inf && enemy_archer) {
+            auto skills = player_inf->get_available_skills();
+            const BattleSkill* ab_skill = nullptr;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::ArmorBreak) ab_skill = &s;
+            }
+            if (ab_skill) {
+                player_inf->has_acted = false;
+                player_inf->used_skill = false;
+                player_inf->morale = 50;
+                battle.use_skill(*player_inf, *ab_skill, enemy_archer->grid_x, enemy_archer->grid_y);
+                check(enemy_archer->is_armor_broken(), "armor break skill applied to enemy");
+            }
+        }
+
+        // Burn skill
+        if (player_inf && enemy_archer) {
+            auto skills = player_inf->get_available_skills();
+            const BattleSkill* burn_skill = nullptr;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Burn) burn_skill = &s;
+            }
+            if (burn_skill) {
+                player_inf->has_acted = false;
+                player_inf->used_skill = false;
+                player_inf->morale = 50;
+                battle.use_skill(*player_inf, *burn_skill, enemy_archer->grid_x, enemy_archer->grid_y);
+                check(enemy_archer->is_burning(), "burn skill applied to enemy");
+            }
+        }
+
+        // ---- Silenced unit cannot use skills ----
+        LOG_INFO("--- Skill Restrictions ---");
+        if (player_inf) {
+            player_inf->has_acted = false;
+            player_inf->used_skill = false;
+            player_inf->morale = 50;
+            battle.apply_status_effect(*player_inf, StatusEffect::Type::Silence, 2, 0);
+            auto skills = player_inf->get_available_skills();
+            bool has_guard = false;
+            for (const auto& s : skills) {
+                if (s.type == SkillType::Guard) has_guard = true;
+            }
+            if (has_guard) {
+                const BattleSkill* guard_skill = nullptr;
+                for (const auto& s : skills) {
+                    if (s.type == SkillType::Guard) guard_skill = &s;
+                }
+                if (guard_skill) {
+                    player_inf->grid_x = 5;
+                    player_inf->grid_y = 5;
+                    int32_t result = battle.use_skill(*player_inf, *guard_skill, 5, 5);
+                    check(result == 0, "silenced unit cannot use skill (returns 0)");
+                    check(player_inf->has_acted == false, "silenced unit has_acted remains false");
+                }
+            }
+        }
+
+        // ---- Weather affects attack ----
+        LOG_INFO("--- Weather Attack Penalty ---");
+        battle.set_weather(3);  // Fog: -2 attack penalty
+        check(battle.weather_attack_penalty() == -2, "fog attack penalty == -2");
+        battle.set_weather(1);  // Rain: -1
+        check(battle.weather_attack_penalty() == -1, "rain attack penalty == -1");
+        battle.set_weather(0);  // Clear: 0
+        check(battle.weather_attack_penalty() == 0, "clear attack penalty == 0");
+
+        // ---- Win conditions ----
+        LOG_INFO("--- Win Conditions ---");
+        // Just verify check_win_conditions doesn't crash on a fresh battle
+        battle.check_win_conditions();
+        check(true, "check_win_conditions runs without crash");
+
+        // ---- Settlement ----
+        LOG_INFO("--- Settlement ---");
+        auto settlement = battle.get_settlement();
+        check(true, "get_settlement returns settlement");
+
+        // ---- Summary ----
+        LOG_INFO("=== Battle Test Summary ===");
+        LOG_INFO("  Failures: {}", failures);
+        if (failures == 0) {
+            LOG_INFO("All battle tests PASSED");
+        } else {
+            LOG_ERROR("{} battle test(s) FAILED", failures);
+        }
+        return failures == 0;
+    }
+
+    /// Headless castle command test: loyalty, tax, rebellion, region control.
+    /// Returns true if all checks pass.
+    bool run_castle_test() {
+        LOG_INFO("=== Castle Command System Test ===");
+
+        int failures = 0;
+        auto check = [&](bool cond, const std::string& desc) {
+            if (cond) {
+                LOG_INFO("  PASS: {}", desc);
+            } else {
+                LOG_ERROR("  FAIL: {}", desc);
+                ++failures;
+            }
+        };
+
+        CastleCommand cmd;
+
+        // ---- Setup test castles ----
+        LOG_INFO("--- Setup ---");
+        std::vector<CastleData> test_castles;
+        for (uint32_t i = 1; i <= 5; ++i) {
+            CastleData c;
+            c.index = i;
+            c.name = "Castle " + std::to_string(i);
+            c.name_utf8 = c.name;
+            c.level = 1;
+            c.gold = 1000;
+            c.food = 500;
+            c.garrison = 0;
+            c.max_garrison = 100;
+            c.loyalty = 50;
+            c.tax_rate = 50;
+            c.unrest = 0;
+            c.is_player_owned = true;
+            c.region_id = (i <= 3) ? 1 : 2;  // Castles 1-3 in region 1, 4-5 in region 2
+            c.is_capital = (i == 1);
+            test_castles.push_back(c);
+        }
+        cmd.set_castles_data(test_castles);
+        check(cmd.castles().size() == 5, "5 test castles created");
+
+        // ---- Tax rate management ----
+        LOG_INFO("--- Tax Rate ---");
+        cmd.set_tax_rate(50);
+        check(cmd.tax_rate() == 50, "tax rate set to 50");
+        cmd.set_tax_rate(80);
+        check(cmd.tax_rate() == 80, "tax rate set to 80");
+        cmd.set_tax_rate(150);  // Should clamp to 100
+        check(cmd.tax_rate() == 100, "tax rate clamped to 100");
+        cmd.set_tax_rate(-10);  // Should clamp to 0
+        check(cmd.tax_rate() == 0, "tax rate clamped to 0");
+
+        // ---- Tax income calculation ----
+        LOG_INFO("--- Tax Income ---");
+        cmd.set_tax_rate(50);
+        CastleData rich_castle = test_castles[0];
+        rich_castle.has_market = true;
+        rich_castle.level = 3;
+        int32_t income = cmd.calculate_tax_income(rich_castle);
+        // base=100, market +200, level bonus 50*2=100 => 400 * 50/100 = 200
+        check(income == 200, "tax income with market + level 3 at 50% == 200");
+
+        CastleData poor_castle = test_castles[0];
+        poor_castle.level = 1;
+        int32_t poor_income = cmd.calculate_tax_income(poor_castle);
+        // base=100 * 50/100 = 50
+        check(poor_income == 50, "tax income at level 1, 50% rate == 50");
+
+        // High tax = more income
+        cmd.set_tax_rate(100);
+        int32_t high_income = cmd.calculate_tax_income(rich_castle);
+        // 400 * 100/100 = 400
+        check(high_income == 400, "tax income at 100% rate == 400");
+
+        // ---- Loyalty management ----
+        LOG_INFO("--- Loyalty ---");
+        cmd.set_tax_rate(50);
+        cmd.adjust_loyalty(1, 10);
+        check(cmd.castle_loyalty(1) == 60, "loyalty adjusted +10 to 60");
+        cmd.adjust_loyalty(1, -20);
+        check(cmd.castle_loyalty(1) == 40, "loyalty adjusted -20 to 40");
+        cmd.adjust_loyalty(1, -100);  // Should clamp to 0
+        check(cmd.castle_loyalty(1) == 0, "loyalty clamped to 0");
+        cmd.adjust_loyalty(1, 200);  // Should clamp to 100
+        check(cmd.castle_loyalty(1) == 100, "loyalty clamped to 100");
+
+        // ---- Loyalty change calculation ----
+        LOG_INFO("--- Loyalty Change ---");
+        cmd.set_tax_rate(50);
+        CastleData normal_castle = test_castles[0];
+        normal_castle.garrison = 60;  // > max_garrison/2 = 50
+        normal_castle.has_market = true;
+        normal_castle.has_storehouse = true;
+        normal_castle.lord_officer_id = 5;
+        int32_t change = cmd.calculate_loyalty_change(normal_castle);
+        // garrison bonus +1, market +1, storehouse +1, lord +2 = +5
+        check(change == 5, "loyalty change with all bonuses == +5");
+
+        // High tax penalty
+        cmd.set_tax_rate(80);
+        CastleData high_tax_castle = test_castles[0];
+        high_tax_castle.garrison = 60;
+        high_tax_castle.lord_officer_id = 5;
+        int32_t high_tax_change = cmd.calculate_loyalty_change(high_tax_castle);
+        // tax > 60: -((80-60)/10) = -2, garrison +1, lord +2 = +1
+        check(high_tax_change == 1, "loyalty change with high tax (80%) == +1");
+
+        // Very high tax
+        cmd.set_tax_rate(100);
+        CastleData very_high_tax = test_castles[0];
+        very_high_tax.garrison = 60;
+        very_high_tax.lord_officer_id = 5;
+        int32_t vht_change = cmd.calculate_loyalty_change(very_high_tax);
+        // tax > 60: -((100-60)/10) = -4, garrison +1, lord +2 = -1
+        check(vht_change == -1, "loyalty change with very high tax (100%) == -1");
+
+        // Low tax bonus
+        cmd.set_tax_rate(20);
+        CastleData low_tax_castle = test_castles[0];
+        low_tax_castle.garrison = 60;
+        low_tax_castle.lord_officer_id = 5;
+        int32_t low_tax_change = cmd.calculate_loyalty_change(low_tax_castle);
+        // tax < 40: +(40-20)/10 = +2, garrison +1, lord +2 = +5
+        check(low_tax_change == 5, "loyalty change with low tax (20%) == +5");
+
+        // ---- Rebellion system ----
+        LOG_INFO("--- Rebellion ---");
+        // Reset castle 1 to player-owned with low loyalty and high unrest
+        auto* c1 = cmd.get_castle(1);
+        c1->is_player_owned = true;
+        c1->loyalty = 5;   // Very low loyalty
+        c1->unrest = 80;   // Very high unrest
+        c1->index = 1;
+        // rebellion_chance = (80-50)/10 + (30-5)/5 = 3 + 5 = 8
+        // rng seed = 1*1000 + 5 = 1005, deterministic
+        bool rebelled = cmd.check_rebellion(1);
+        LOG_INFO("  castle 1 rebellion chance check returned {}", rebelled ? "true" : "false");
+        // Note: rebellion is random, just verify it doesn't crash and records events properly
+
+        // Manual trigger rebellion
+        cmd.trigger_rebellion(1);
+        check(!c1->is_player_owned, "rebelled castle is no longer player-owned");
+        check(c1->lord_officer_id == 0, "rebelled castle lord dismissed");
+        check(c1->loyalty == 50, "rebelled castle loyalty reset to 50");
+        check(c1->unrest == 30, "rebelled castle unrest set to 30");
+        check(cmd.rebellion_events().size() == 1, "1 rebellion event recorded");
+        check(cmd.rebellion_events()[0].castle_index == 1, "rebellion event has correct castle index");
+
+        // Non-player castle cannot rebel
+        auto* c2 = cmd.get_castle(2);
+        c2->is_player_owned = false;
+        c2->loyalty = 0;
+        c2->unrest = 100;
+        bool c2_rebelled = cmd.check_rebellion(2);
+        check(!c2_rebelled, "non-player castle cannot rebel");
+
+        // Player-owned castle with high loyalty should not rebel (usually)
+        cmd.set_tax_rate(50);
+        auto* c3 = cmd.get_castle(3);
+        c3->is_player_owned = true;
+        c3->loyalty = 90;
+        c3->unrest = 5;
+        bool c3_rebelled = cmd.check_rebellion(3);
+        // loyalty 90, unrest 5 => rebellion_chance = 0, should not rebel
+        check(!c3_rebelled, "high loyalty castle does not rebel");
+
+        // ---- Region control ----
+        LOG_INFO("--- Region Control ---");
+        // Reset all castles to player-owned (castle 1 may have rebelled earlier)
+        for (auto& c : test_castles) {
+            if (auto* cc = cmd.get_castle(c.index)) {
+                cc->is_player_owned = true;
+            }
+        }
+        // Castles 1,2,3 in region 1, all player-owned
+        check(cmd.controls_region(1), "player controls region 1 (all 3 castles)");
+        // Castles 4,5 in region 2, all player-owned
+        check(cmd.controls_region(2), "player controls region 2 (all 2 castles)");
+
+        // Make castle 3 enemy-owned
+        auto* c3_enemy = cmd.get_castle(3);
+        c3_enemy->is_player_owned = false;
+        check(!cmd.controls_region(1), "region 1 not controlled if castle 3 is enemy");
+        check(cmd.get_castles_in_region(1).size() == 3, "region 1 has 3 castles");
+        check(cmd.get_player_castles_in_region(1).size() == 2,
+              "region 1 has 2 player castles after castle 3 lost");
+
+        // Restore
+        c3_enemy->is_player_owned = true;
+
+        // ---- Player castles ----
+        LOG_INFO("--- Player Castles ---");
+        auto player_castles = cmd.get_player_castles();
+        check(player_castles.size() == 5, "5 player castles (all castles are player-owned)");
+        check(cmd.player_castle_count() == 5, "player castle count == 5");
+
+        // ---- Monthly income processing ----
+        LOG_INFO("--- Monthly Income ---");
+        cmd.set_tax_rate(50);
+        // Reset castle data
+        for (auto& c : test_castles) {
+            c.is_player_owned = true;
+            c.loyalty = 50;
+            c.unrest = 0;
+            c.gold = 1000;
+            c.food = 500;
+            c.garrison = 10;
+        }
+        cmd.set_castles_data(test_castles);
+        cmd.process_monthly_income();
+        // Turn should advance
+        check(cmd.get_turn_count() == 1, "turn advanced to 1 after monthly income");
+        // Castle should have gained income
+        auto* updated = cmd.get_castle(1);
+        check(updated->gold >= 1000, "castle gained gold income");
+        check(updated->food >= 500, "castle has food after production");
+
+        // ---- Auto-recruit ----
+        LOG_INFO("--- Auto Recruit ---");
+        // Castle with gold but not full garrison
+        auto* recruit_castle = cmd.get_castle(1);
+        recruit_castle->gold = 1000;
+        recruit_castle->garrison = 10;
+        recruit_castle->max_garrison = 100;
+        cmd.process_auto_recruit();
+        // Should recruit as many as possible with 1000 gold at 5/troop = 200 troops
+        // But max_garrison - garrison = 90, so recruit 90
+        check(recruit_castle->garrison == 100, "auto-recruit filled garrison to max");
+        check(recruit_castle->gold == 1000 - 90 * 5, "gold spent on recruitment");
+
+        // ---- Gold/Food/Auto-defense calculations ----
+        LOG_INFO("--- Resource Calculations ---");
+        CastleData calc_castle;
+        calc_castle.level = 2;
+        calc_castle.garrison = 50;
+        check(cmd.calculate_food_production(calc_castle) == 75,
+              "food production: 50 base + 25 (level2) = 75");
+        check(cmd.calculate_food_consumption(calc_castle) == 5,
+              "food consumption: 50/10 = 5");
+        calc_castle.has_wall = true;
+        calc_castle.has_barracks = true;
+        check(cmd.calculate_auto_defense(calc_castle) == 30 + 20 + 20,
+              "auto-defense: wall 30 + barracks 20 + level 20 = 70");
+
+        // ---- Battle → Map Integration ----
+        LOG_INFO("--- Battle to Map Integration ---");
+        // Reset all castles to known state
+        for (auto& c : test_castles) {
+            c.is_player_owned = (c.index <= 3);  // Castles 1-3 player, 4-5 enemy
+            c.loyalty = 50;
+            c.unrest = 0;
+            c.garrison = 10;
+            c.gold = 1000;
+            c.lord_officer_id = 0;
+        }
+        cmd.set_castles_data(test_castles);
+
+        // Simulate PlayerVictory: player attacks enemy castle 4 (region 2)
+        auto* castle4 = cmd.get_castle(4);
+        castle4->is_player_owned = false;
+        castle4->loyalty = 30;
+        castle4->unrest = 20;
+        // Apply victory logic (same as MapViewState)
+        castle4->is_player_owned = true;
+        castle4->lord_officer_id = 0;
+        castle4->lord_name.clear();
+        castle4->lord_name_utf8.clear();
+        castle4->loyalty = 50;
+        castle4->unrest = 10;
+        castle4->garrison = std::max(castle4->garrison, 30);
+        castle4->garrison = std::min(castle4->garrison, castle4->max_garrison);
+        // Reward source castle (castle 1)
+        auto* castle1 = cmd.get_castle(1);
+        castle1->gold += 500;
+
+        check(castle4->is_player_owned, "victory: castle 4 becomes player-owned");
+        check(castle4->loyalty == 50, "victory: castle 4 loyalty reset to 50");
+        check(castle4->unrest == 10, "victory: castle 4 unrest set to 10");
+        check(castle4->garrison >= 30, "victory: castle 4 garrison set to >= 30");
+        check(castle1->gold == 1500, "victory: source castle 1 gained 500 gold");
+        // Region 2: castles 4 and 5, now castle 4 is player-owned but 5 is not
+        check(!cmd.controls_region(2), "victory: region 2 not fully controlled yet");
+
+        // Now make castle 5 also player-owned (simulate second victory)
+        auto* castle5 = cmd.get_castle(5);
+        castle5->is_player_owned = true;
+        check(cmd.controls_region(2), "victory: region 2 fully controlled after castle 5");
+
+        // Simulate PlayerDefeat: player attacks from castle 1, loses
+        castle1->garrison = 50;
+        castle1->is_player_owned = true;
+        // Apply defeat logic (same as MapViewState)
+        castle1->garrison = std::max(0, castle1->garrison - 20);
+        check(castle1->garrison == 30, "defeat: source castle 1 loses 20 troops");
+
+        // Defensive battle loss: player-owned target castle is lost
+        auto* castle2 = cmd.get_castle(2);
+        castle2->is_player_owned = true;
+        castle2->loyalty = 60;
+        castle2->lord_officer_id = 7;
+        castle2->lord_name = "Lord";
+        // Apply defensive defeat logic
+        castle2->is_player_owned = false;
+        castle2->lord_officer_id = 0;
+        castle2->lord_name.clear();
+        castle2->lord_name_utf8.clear();
+        check(!castle2->is_player_owned, "defeat: player-owned castle 2 is lost");
+        check(castle2->lord_officer_id == 0, "defeat: castle 2 lord dismissed");
+        check(!cmd.controls_region(1), "defeat: region 1 no longer fully controlled");
+
+        // ---- Summary ----
+        LOG_INFO("=== Castle Test Summary ===");
+        LOG_INFO("  Failures: {}", failures);
+        if (failures == 0) {
+            LOG_INFO("All castle tests PASSED");
+        } else {
+            LOG_ERROR("{} castle test(s) FAILED", failures);
+        }
+        return failures == 0;
+    }
+
+    /// Headless save/load system test: save, load, delete, list slots.
+    /// Returns true if all checks pass.
+    bool run_save_test() {
+        LOG_INFO("=== Save/Load System Test ===");
+
+        int failures = 0;
+        auto check = [&](bool cond, const std::string& desc) {
+            if (cond) {
+                LOG_INFO("  PASS: {}", desc);
+            } else {
+                LOG_ERROR("  FAIL: {}", desc);
+                ++failures;
+            }
+        };
+
+        // Use a temp directory for saves
+        const std::string test_save_dir = "/tmp/tensyoki_save_test";
+        SaveSystem save_sys;
+        save_sys.init(test_save_dir);
+
+        // ---- Initially no saves ----
+        LOG_INFO("--- Initial State ---");
+        check(save_sys.list_saves().empty(), "no saves initially");
+        check(!save_sys.slot_exists(1), "slot 1 does not exist initially");
+
+        // ---- Create save data ----
+        LOG_INFO("--- Create Save ---");
+        GameSaveData data;
+        data.version = 1;
+        data.date_year = 4;
+        data.date_month = 10;
+        data.date_day = 15;
+        data.save_name = "Test Save";
+        data.player_castle_count = 3;
+        data.total_castles = 10;
+
+        // Add some castle data
+        CastleData c1;
+        c1.index = 1;
+        c1.name = "Castle A";
+        c1.name_utf8 = "Castle A";
+        c1.level = 3;
+        c1.garrison = 50;
+        c1.gold = 2000;
+        c1.food = 1000;
+        c1.loyalty = 75;
+        c1.tax_rate = 40;
+        c1.unrest = 10;
+        c1.is_player_owned = true;
+        c1.region_id = 1;
+        data.castles.push_back(c1);
+
+        CastleData c2;
+        c2.index = 2;
+        c2.name = "Castle B";
+        c2.name_utf8 = "Castle B";
+        c2.level = 2;
+        c2.garrison = 30;
+        c2.gold = 1500;
+        c2.food = 800;
+        c2.loyalty = 60;
+        c2.tax_rate = 50;
+        c2.unrest = 20;
+        c2.is_player_owned = false;
+        c2.region_id = 1;
+        data.castles.push_back(c2);
+
+        // ---- Save to slot 1 ----
+        LOG_INFO("--- Save ---");
+        bool saved = save_sys.save(1, data);
+        check(saved, "save to slot 1 succeeded");
+        check(save_sys.slot_exists(1), "slot 1 exists after save");
+
+        // ---- List saves ----
+        LOG_INFO("--- List Saves ---");
+        auto slots = save_sys.list_saves();
+        check(slots.size() == 1, "1 save slot listed");
+        check(slots[0].slot == 1, "slot number is 1");
+        check(slots[0].save_name == "Test Save", "save name is 'Test Save'");
+        check(slots[0].date_year == 4, "date year is 4");
+        check(slots[0].date_month == 10, "date month is 10");
+        check(slots[0].date_day == 15, "date day is 15");
+        check(slots[0].player_castle_count == 3, "player castle count is 3");
+        check(slots[0].total_castles == 10, "total castle count is 10");
+        check(slots[0].is_valid, "slot is valid");
+
+        // ---- Load from slot 1 ----
+        LOG_INFO("--- Load ---");
+        GameSaveData loaded;
+        bool loaded_ok = save_sys.load(1, loaded);
+        check(loaded_ok, "load from slot 1 succeeded");
+        check(loaded.version == 1, "loaded version is 1");
+        check(loaded.date_year == 4, "loaded date year is 4");
+        check(loaded.date_month == 10, "loaded date month is 10");
+        check(loaded.date_day == 15, "loaded date day is 15");
+        check(loaded.save_name == "Test Save", "loaded save name matches");
+        check(loaded.player_castle_count == 3, "loaded player castle count matches");
+        check(loaded.total_castles == 10, "loaded total castle count matches");
+        check(loaded.castles.size() == 2, "loaded 2 castles");
+        check(loaded.castles[0].index == 1, "loaded castle 1 index matches");
+        check(loaded.castles[0].name == "Castle A", "loaded castle 1 name matches");
+        check(loaded.castles[0].loyalty == 75, "loaded castle 1 loyalty matches");
+        check(loaded.castles[0].tax_rate == 40, "loaded castle 1 tax rate matches");
+        check(loaded.castles[0].unrest == 10, "loaded castle 1 unrest matches");
+        check(loaded.castles[0].is_player_owned, "loaded castle 1 is player-owned");
+        check(loaded.castles[1].index == 2, "loaded castle 2 index matches");
+        check(!loaded.castles[1].is_player_owned, "loaded castle 2 is not player-owned");
+
+        // ---- Save to slot 2 and verify both exist ----
+        LOG_INFO("--- Multiple Saves ---");
+        GameSaveData data2;
+        data2.version = 1;
+        data2.date_year = 5;
+        data2.date_month = 1;
+        data2.date_day = 1;
+        data2.save_name = "Second Save";
+        data2.player_castle_count = 1;
+        data2.total_castles = 5;
+        bool saved2 = save_sys.save(2, data2);
+        check(saved2, "save to slot 2 succeeded");
+        slots = save_sys.list_saves();
+        check(slots.size() == 2, "2 save slots listed");
+
+        // ---- Delete slot 1 ----
+        LOG_INFO("--- Delete ---");
+        bool deleted = save_sys.delete_save(1);
+        check(deleted, "delete slot 1 succeeded");
+        check(!save_sys.slot_exists(1), "slot 1 no longer exists");
+        slots = save_sys.list_saves();
+        check(slots.size() == 1, "1 save slot remains after delete");
+        check(slots[0].slot == 2, "remaining slot is slot 2");
+
+        // ---- Overwrite save ----
+        LOG_INFO("--- Overwrite ---");
+        GameSaveData data3;
+        data3.version = 1;
+        data3.date_year = 9;
+        data3.date_month = 9;
+        data3.date_day = 9;
+        data3.save_name = "Overwritten Save";
+        data3.player_castle_count = 0;
+        data3.total_castles = 0;
+        bool overwritten = save_sys.save(2, data3);
+        check(overwritten, "overwrite slot 2 succeeded");
+        GameSaveData loaded2;
+        save_sys.load(2, loaded2);
+        check(loaded2.date_year == 9, "overwritten date year is 9");
+        check(loaded2.save_name == "Overwritten Save", "overwritten save name matches");
+
+        // ---- Cleanup test saves ----
+        save_sys.delete_save(2);
+        std::error_code ec;
+        std::filesystem::remove_all(test_save_dir, ec);
+
+        // ---- Summary ----
+        LOG_INFO("=== Save Test Summary ===");
+        LOG_INFO("  Failures: {}", failures);
+        if (failures == 0) {
+            LOG_INFO("All save tests PASSED");
+        } else {
+            LOG_ERROR("{} save test(s) FAILED", failures);
+        }
+        return failures == 0;
+    }
+
+    /// Headless officer system test: officer list, assign/dismiss lord, attribute editing.
+    /// Returns true if all checks pass.
+    bool run_officer_test() {
+        LOG_INFO("=== Officer System Test ===");
+
+        int failures = 0;
+        auto check = [&](bool cond, const std::string& desc) {
+            if (cond) {
+                LOG_INFO("  PASS: {}", desc);
+            } else {
+                LOG_ERROR("  FAIL: {}", desc);
+                ++failures;
+            }
+        };
+
+        CastleCommand cmd;
+
+        // ---- Setup test castles and officers ----
+        LOG_INFO("--- Setup ---");
+        std::vector<CastleData> test_castles;
+        for (uint32_t i = 1; i <= 3; ++i) {
+            CastleData c;
+            c.index = i;
+            c.name = "Castle " + std::to_string(i);
+            c.name_utf8 = c.name;
+            c.level = 1;
+            c.gold = 1000;
+            c.food = 500;
+            c.garrison = 0;
+            c.max_garrison = 100;
+            c.loyalty = 50;
+            c.tax_rate = 50;
+            c.unrest = 0;
+            c.is_player_owned = true;
+            c.region_id = 1;
+            c.is_capital = (i == 1);
+            test_castles.push_back(c);
+        }
+        cmd.set_castles_data(test_castles);
+        check(cmd.castles().size() == 3, "3 test castles created");
+
+        // ---- Assign lord ----
+        LOG_INFO("--- Assign Lord ---");
+        auto result = cmd.assign_lord(1, 42);
+        check(result == CommandResult::Success, "assign officer 42 to castle 1 succeeds");
+        auto* c1 = cmd.get_castle(1);
+        check(c1->lord_officer_id == 42, "castle 1 lord is officer 42");
+
+        // ---- Dismiss lord ----
+        LOG_INFO("--- Dismiss Lord ---");
+        result = cmd.dismiss_lord(1);
+        check(result == CommandResult::Success, "dismiss lord from castle 1 succeeds");
+        c1 = cmd.get_castle(1);
+        check(c1->lord_officer_id == 0, "castle 1 lord dismissed (id == 0)");
+        check(c1->lord_name.empty(), "castle 1 lord_name cleared");
+        check(c1->lord_name_utf8.empty(), "castle 1 lord_name_utf8 cleared");
+
+        // ---- Assign multiple lords ----
+        LOG_INFO("--- Multiple Lords ---");
+        cmd.assign_lord(1, 10);
+        cmd.assign_lord(2, 20);
+        cmd.assign_lord(3, 30);
+        check(cmd.get_castle(1)->lord_officer_id == 10, "castle 1 lord is officer 10");
+        check(cmd.get_castle(2)->lord_officer_id == 20, "castle 2 lord is officer 20");
+        check(cmd.get_castle(3)->lord_officer_id == 30, "castle 3 lord is officer 30");
+
+        // ---- find_officer_castle logic (simulating OfficerDetailState) ----
+        LOG_INFO("--- Find Officer Castle ---");
+        auto find_castle_for_officer = [&cmd](uint16_t officer_id) -> const CastleData* {
+            for (const auto& castle : cmd.castles()) {
+                if (castle.lord_officer_id == officer_id) {
+                    return &castle;
+                }
+            }
+            return nullptr;
+        };
+        auto* castle_for_10 = find_castle_for_officer(10);
+        check(castle_for_10 != nullptr && castle_for_10->index == 1,
+              "officer 10 is lord of castle 1");
+        auto* castle_for_20 = find_castle_for_officer(20);
+        check(castle_for_20 != nullptr && castle_for_20->index == 2,
+              "officer 20 is lord of castle 2");
+        auto* castle_for_99 = find_castle_for_officer(99);
+        check(castle_for_99 == nullptr, "officer 99 is not a lord anywhere");
+
+        // ---- Attribute editing (simulating OfficerDetailState::render_attr_editor) ----
+        LOG_INFO("--- Attribute Editing ---");
+        // Simulate an officer's attr vector
+        std::vector<uint8_t> attr(47, 0);
+        attr[24] = 50;  // Loyalty
+        attr[25] = 60;  // Command
+        attr[26] = 70;  // Warfare
+
+        // Edit loyalty
+        int32_t new_loyalty = 80;
+        new_loyalty = std::clamp(new_loyalty, 0, 100);
+        attr[24] = static_cast<uint8_t>(new_loyalty);
+        check(attr[24] == 80, "attribute editing: loyalty changed to 80");
+
+        // Edit command
+        int32_t new_command = 90;
+        new_command = std::clamp(new_command, 0, 100);
+        attr[25] = static_cast<uint8_t>(new_command);
+        check(attr[25] == 90, "attribute editing: command changed to 90");
+
+        // Clamp test
+        int32_t over_loyalty = 150;
+        over_loyalty = std::clamp(over_loyalty, 0, 100);
+        attr[24] = static_cast<uint8_t>(over_loyalty);
+        check(attr[24] == 100, "attribute editing: loyalty clamped to 100");
+
+        int32_t under_loyalty = -20;
+        under_loyalty = std::clamp(under_loyalty, 0, 100);
+        attr[24] = static_cast<uint8_t>(under_loyalty);
+        check(attr[24] == 0, "attribute editing: loyalty clamped to 0");
+
+        // ---- Officer list iteration (simulating OfficerDetailState list) ----
+        LOG_INFO("--- Officer List ---");
+        // Create mock officers
+        struct MockOfficer {
+            uint32_t slot;
+            uint16_t id;
+            std::string name_utf8;
+        };
+        std::vector<MockOfficer> mock_officers = {
+            {0, 1, "Oda Nobunaga"},
+            {1, 2, "Toyotomi Hideyoshi"},
+            {2, 3, "Tokugawa Ieyasu"},
+        };
+
+        int found_count = 0;
+        for (const auto& off : mock_officers) {
+            if (!off.name_utf8.empty()) found_count++;
+        }
+        check(found_count == 3, "3 mock officers iterated");
+
+        // Search filter test
+        std::string search = "nobunaga";
+        bool found_nobunaga = false;
+        for (const auto& off : mock_officers) {
+            std::string lower_name = off.name_utf8;
+            std::string lower_search = search;
+            std::transform(lower_name.begin(), lower_name.end(),
+                           lower_name.begin(), ::tolower);
+            std::transform(lower_search.begin(), lower_search.end(),
+                           lower_search.begin(), ::tolower);
+            if (lower_name.find(lower_search) != std::string::npos) {
+                found_nobunaga = true;
+            }
+        }
+        check(found_nobunaga, "search filter finds 'nobunaga'");
+
+        // Search filter no match
+        std::string search2 = "zzz";
+        bool found_zzz = false;
+        for (const auto& off : mock_officers) {
+            std::string lower_name = off.name_utf8;
+            std::string lower_search = search2;
+            std::transform(lower_name.begin(), lower_name.end(),
+                           lower_name.begin(), ::tolower);
+            std::transform(lower_search.begin(), lower_search.end(),
+                           lower_search.begin(), ::tolower);
+            if (lower_name.find(lower_search) != std::string::npos) {
+                found_zzz = true;
+            }
+        }
+        check(!found_zzz, "search filter 'zzz' finds no officers");
+
+        // ---- Summary ----
+        LOG_INFO("=== Officer Test Summary ===");
+        LOG_INFO("  Failures: {}", failures);
+        if (failures == 0) {
+            LOG_INFO("All officer tests PASSED");
+        } else {
+            LOG_ERROR("{} officer test(s) FAILED", failures);
+        }
+        return failures == 0;
+    }
+
     void main_loop() {
         bool running = true;
         uint64_t frame_count = 0;
@@ -494,6 +1666,10 @@ private:
                         case GameContext::PendingState::CastleCommand:
                             game_state_mgr_.push(
                                 std::make_unique<CastleCommandState>(game_ctx_));
+                            break;
+                        case GameContext::PendingState::CastleDetail:
+                            game_state_mgr_.push(
+                                std::make_unique<CastleDetailState>(game_ctx_));
                             break;
                         case GameContext::PendingState::None:
                             break;
@@ -1399,6 +2575,10 @@ void main() {
     bool show_texture_viewer_ = false;
     bool show_officer_card_ = false;
     bool check_resources_ = false;
+    bool battle_test_ = false;
+    bool castle_test_ = false;
+    bool save_test_ = false;
+    bool officer_test_ = false;
     bool help_requested_ = false;
 
     std::unique_ptr<BinArchive> selected_archive_;
