@@ -32,6 +32,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -2082,6 +2083,67 @@ private:
         save_system.delete_save(1);
         std::error_code ec;
         std::filesystem::remove_all(test_dir, ec);
+
+        // ---- AI officer assignment ----
+        LOG_INFO("--- AI Officer Assignment ---");
+        {
+            SndataArchive ai_sndata;
+            ai_sndata.scenario = 1;
+
+            // Four castles, one per AI faction (regions 0-3 -> factions 2-5),
+            // none with a lord yet.
+            for (uint32_t i = 0; i < 4; ++i) {
+                Castle castle;
+                castle.index = i;
+                castle.name_utf8 = "Castle " + std::to_string(i);
+                castle.name_raw = castle.name_utf8;
+                ai_sndata.castles.push_back(std::move(castle));
+            }
+
+            // Five unassigned officers available for appointment.
+            for (uint32_t i = 1; i <= 5; ++i) {
+                Officer off;
+                off.slot = i;
+                off.id = i;
+                off.status = 0;
+                off.gender = 0;
+                off.name_utf8 = "Officer " + std::to_string(i);
+                off.name_raw = off.name_utf8;
+                ai_sndata.officers.push_back(std::move(off));
+            }
+
+            CastleCommand ai_cmd;
+            ai_cmd.init(ai_sndata);
+            ai_cmd.set_turn_count(0);
+
+            StrategyManager ai_strategy;
+            ai_strategy.set_seed(999);
+            ai_strategy.init(ai_cmd);
+
+            GameDate ai_date(1, 4, 1);
+            std::vector<StrategyEvent> ai_events;
+            ai_strategy.process_ai_turn(ai_cmd, ai_date, ai_events);
+
+            check(has_event(ai_events, StrategyEventType::OfficerAssigned),
+                  "AI officer assignment logs OfficerAssigned event");
+
+            int32_t lords_assigned = 0;
+            for (const auto& c : ai_cmd.castles()) {
+                if (c.lord_officer_id != 0) ++lords_assigned;
+            }
+            check(lords_assigned > 0,
+                  "at least one AI castle received a lord this turn");
+
+            // No officer should be appointed to two castles at once.
+            std::set<uint32_t> assigned_ids;
+            for (const auto& c : ai_cmd.castles()) {
+                if (c.lord_officer_id != 0) {
+                    check(!assigned_ids.count(c.lord_officer_id),
+                          "officer not assigned to multiple castles");
+                    assigned_ids.insert(c.lord_officer_id);
+                }
+            }
+        }
 
         // ---- Summary ----
         LOG_INFO("=== Strategy Test Summary ===");

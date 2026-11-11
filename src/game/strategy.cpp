@@ -372,6 +372,10 @@ void StrategyManager::process_ai_turn(CastleCommand& cmd, const GameDate& date,
 void StrategyManager::process_ai_faction(
     CastleCommand& cmd, const GameDate& date, Faction& faction,
     std::vector<StrategyEvent>& events) {
+    // Assign lords to castles that lack one before this month's economy is
+    // resolved, so a newly appointed lord immediately grants the loyalty bonus.
+    process_ai_officer_assignment(cmd, faction, date, events);
+
     process_ai_economy(cmd, date, faction, events);
 
     const int32_t recruited = process_ai_recruitment(cmd, faction);
@@ -429,6 +433,47 @@ int32_t StrategyManager::process_ai_recruitment(CastleCommand& cmd,
     }
 
     return total;
+}
+
+void StrategyManager::process_ai_officer_assignment(
+    CastleCommand& cmd, Faction& faction, const GameDate& date,
+    std::vector<StrategyEvent>& events) {
+    // Collect castles owned by this faction that still lack a lord.
+    std::vector<uint32_t> lordless_castles;
+    for (const auto& castle : cmd.castles()) {
+        if (castle.owner_id == faction.id && castle.lord_officer_id == 0) {
+            lordless_castles.push_back(castle.index);
+        }
+    }
+    if (lordless_castles.empty()) return;
+
+    int32_t assigned = 0;
+    for (uint32_t castle_index : lordless_castles) {
+        // Re-query after each assignment: the pool of unassigned officers
+        // shrinks as lords are appointed.
+        auto available = cmd.get_available_officers(0);
+        if (available.empty()) break;
+
+        // Prefer an officer not already serving this faction elsewhere; the
+        // first available officer is a deterministic placeholder. A future
+        // refinement can match officer attributes (loyalty, command, war) to
+        // castle needs and regional origin.
+        uint32_t officer_id = available.front();
+        if (cmd.assign_lord(castle_index, officer_id) ==
+            CommandResult::Success) {
+            ++assigned;
+            log_event(StrategyEventType::OfficerAssigned, date,
+                      faction.name + " appointed officer " +
+                          std::to_string(officer_id) + " as lord of " +
+                          castle_display_name(*cmd.get_castle(castle_index)) + ".",
+                      &events);
+        }
+    }
+
+    if (assigned > 0) {
+        LOG_INFO("StrategyManager: {} assigned {} officer(s) to castles",
+                 faction.name, assigned);
+    }
 }
 
 bool StrategyManager::process_ai_build(CastleCommand& cmd, const GameDate& date,

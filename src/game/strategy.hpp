@@ -57,6 +57,7 @@ enum class StrategyEventType {
     AiRecruited,
     AiBuilt,
     AiAttack,
+    OfficerAssigned,
     CastleCaptured,
     CastleLost,
     Starvation,
@@ -166,6 +167,9 @@ private:
                             Faction& faction,
                             std::vector<StrategyEvent>& events);
     int32_t process_ai_recruitment(CastleCommand& cmd, Faction& faction);
+    void process_ai_officer_assignment(CastleCommand& cmd, Faction& faction,
+                                       const GameDate& date,
+                                       std::vector<StrategyEvent>& events);
     bool process_ai_build(CastleCommand& cmd, const GameDate& date,
                           Faction& faction,
                           std::vector<StrategyEvent>& events);

@@ -158,7 +158,21 @@ Effective defense:
 garrison + defense * 2 + level * 5 + auto_defense_bonus + 20 if wall
 ```
 
-### 5.1 Abstract combat
+### 5.1 Officer assignment
+
+At the start of each AI faction's monthly turn (before economy, recruitment,
+construction, and attack), `StrategyManager::process_ai_officer_assignment()`
+appoints a lord to every faction-owned castle that still lacks one
+(`lord_officer_id == 0`). Officers are drawn from the pool of officers not yet
+assigned as lord anywhere (`CastleCommand::get_available_officers()`), so no
+officer serves two castles at once. A newly appointed lord immediately grants
+the `+2` lord-presence loyalty bonus during that month's economy resolution.
+
+The current implementation picks the first available officer deterministically.
+A future refinement can match officer attributes (loyalty, command, warfare)
+and regional origin to castle needs.
+
+### 5.2 Abstract combat
 
 ```
 attack_power  = source.garrison + source.level * 5 + random(0..19)
@@ -245,4 +259,4 @@ cd build && ctest
 - Tactical battles are only played when the player initiates them; all other
   combat is statistical.
 - AI does not coordinate between factions, form alliances, or retreat.
-- There is no diplomacy, officer assignment AI, or tactical AI yet.
+- There is no diplomacy, tactical AI, or campaign balancing yet.

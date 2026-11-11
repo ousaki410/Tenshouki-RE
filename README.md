@@ -36,13 +36,14 @@ A native Linux port of *Nobunaga's Ambition: Tenshouki* (信長の野望・天�
 - Eight regional factions with AI economy, recruitment, construction, and attacks
 - Monthly turns, seasonal food modifiers, statistical combat, victory/defeat
 - Ownership-aware map, strategy event log, save format v2
+- AI officer assignment: each AI faction appoints lords to its castles each turn
 - See [docs/STRATEGY_LAYER.md](docs/STRATEGY_LAYER.md)
 
 **Next** 🔲
 - Region table: sndata castle record (33 bytes) carries no region field
   (verified across sndata1..6.dat); keep `castle.index % 8` placeholder until
   map/scenario data provides a verified per-castle region table
-- Diplomacy, officer-assignment AI, tactical AI, and campaign balancing
+- Diplomacy, tactical AI, and campaign balancing
 
 ## Game files
 
