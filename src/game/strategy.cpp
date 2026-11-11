@@ -111,6 +111,15 @@ void StrategyManager::reset(CastleCommand& cmd) {
 }
 
 void StrategyManager::rebuild(CastleCommand& cmd, bool migrate_legacy) {
+    // Reset diplomacy to neutral at campaign start / on load. Player- or
+    // AI-driven diplomacy during the campaign is not saved yet; a future
+    // save format version can persist the matrix.
+    for (uint32_t a = 1; a <= kMaxFactionId; ++a) {
+        for (uint32_t b = 1; b <= kMaxFactionId; ++b) {
+            relations_[a][b] = DiplomacyRelation::Neutral;
+        }
+    }
+
     // Normalise ownership flags. Save files produced before the ownership
     // field existed only carry is_player_owned; assign those castles to the
     // default faction of their region when migrating.
@@ -202,6 +211,65 @@ bool StrategyManager::faction_owns_any_castle(const CastleCommand& cmd,
         if (castle.owner_id == faction_id) return true;
     }
     return false;
+}
+
+DiplomacyRelation StrategyManager::get_relation(uint32_t a,
+                                                uint32_t b) const {
+    if (a == 0 || b == 0 || a > kMaxFactionId || b > kMaxFactionId) {
+        return DiplomacyRelation::Neutral;
+    }
+    return relations_[a][b];
+}
+
+bool StrategyManager::is_at_war(uint32_t a, uint32_t b) const {
+    return get_relation(a, b) == DiplomacyRelation::War;
+}
+
+bool StrategyManager::is_allied(uint32_t a, uint32_t b) const {
+    return get_relation(a, b) == DiplomacyRelation::Alliance;
+}
+
+void StrategyManager::set_relation(uint32_t a, uint32_t b,
+                                   DiplomacyRelation rel,
+                                   const GameDate& date) {
+    if (a == b || a > kMaxFactionId || b > kMaxFactionId) return;
+    if (relations_[a][b] == rel) return;
+
+    relations_[a][b] = rel;
+    relations_[b][a] = rel;
+
+    switch (rel) {
+        case DiplomacyRelation::War:
+            log_event(StrategyEventType::DiplomacyDeclaredWar, date,
+                      faction_name(a) + " declared war on " + faction_name(b) +
+                          ".");
+            break;
+        case DiplomacyRelation::Alliance:
+            log_event(StrategyEventType::DiplomacyAlliance, date,
+                      faction_name(a) + " formed an alliance with " +
+                          faction_name(b) + ".");
+            break;
+        case DiplomacyRelation::Neutral:
+            log_event(StrategyEventType::DiplomacyBrokeAlliance, date,
+                      faction_name(a) + " and " + faction_name(b) +
+                          " are no longer allied.");
+            break;
+    }
+}
+
+void StrategyManager::declare_war(uint32_t a, uint32_t b,
+                                  const GameDate& date) {
+    set_relation(a, b, DiplomacyRelation::War, date);
+}
+
+void StrategyManager::form_alliance(uint32_t a, uint32_t b,
+                                    const GameDate& date) {
+    set_relation(a, b, DiplomacyRelation::Alliance, date);
+}
+
+void StrategyManager::break_alliance(uint32_t a, uint32_t b,
+                                     const GameDate& date) {
+    set_relation(a, b, DiplomacyRelation::Neutral, date);
 }
 
 void StrategyManager::evaluate_end_conditions(const CastleCommand& cmd) {
@@ -522,6 +590,8 @@ std::optional<uint32_t> StrategyManager::weakest_adjacent_enemy(
     for (const auto& castle : cmd.castles()) {
         if (castle.index == source.index) continue;
         if (castle.owner_id == faction_id) continue;
+        // Allies are never attack targets.
+        if (is_allied(faction_id, castle.owner_id)) continue;
         if (!are_adjacent(source, castle)) continue;
 
         const int32_t defense = effective_defense(castle);

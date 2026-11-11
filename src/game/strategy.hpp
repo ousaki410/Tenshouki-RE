@@ -38,6 +38,13 @@ enum class FactionStance {
     Aggressive,
 };
 
+/// Diplomatic relation between two factions.
+enum class DiplomacyRelation {
+    Neutral,   // No special relations; AI may attack each other
+    Alliance,  // Military alliance; AI will not attack each other
+    War,       // Openly at war; AI prioritises attacking each other
+};
+
 /// A campaign faction.
 struct Faction {
     uint32_t id = 0;                 // Faction id stored in CastleData::owner_id
@@ -58,6 +65,9 @@ enum class StrategyEventType {
     AiBuilt,
     AiAttack,
     OfficerAssigned,
+    DiplomacyDeclaredWar,
+    DiplomacyAlliance,
+    DiplomacyBrokeAlliance,
     CastleCaptured,
     CastleLost,
     Starvation,
@@ -121,6 +131,26 @@ public:
     /// Recompute victory/defeat flags from current ownership.
     void evaluate_end_conditions(const CastleCommand& cmd);
 
+    // ---- Diplomacy ----
+
+    /// Diplomatic relation between two factions (symmetric).
+    DiplomacyRelation get_relation(uint32_t a, uint32_t b) const;
+    /// True when the two factions are openly at war.
+    bool is_at_war(uint32_t a, uint32_t b) const;
+    /// True when the two factions are allied.
+    bool is_allied(uint32_t a, uint32_t b) const;
+
+    /// Set the symmetric relation between two factions. Logging an event when
+    /// the relation actually changes.
+    void set_relation(uint32_t a, uint32_t b, DiplomacyRelation rel,
+                      const GameDate& date);
+    /// Declare war between two factions.
+    void declare_war(uint32_t a, uint32_t b, const GameDate& date);
+    /// Form a military alliance between two factions.
+    void form_alliance(uint32_t a, uint32_t b, const GameDate& date);
+    /// Break an existing alliance, returning the factions to neutral.
+    void break_alliance(uint32_t a, uint32_t b, const GameDate& date);
+
     // ---- Queries ----
 
     const std::vector<Faction>& factions() const { return factions_; }
@@ -181,11 +211,20 @@ private:
                               const GameDate& date, bool is_player,
                               std::vector<StrategyEvent>& events);
 
+    // ---- Diplomacy ----
+
+    /// Diplomatic relation between two factions (symmetric).
+    /// True when the two factions are allied.
+
     bool faction_owns_any_castle(const CastleCommand& cmd,
                                  uint32_t faction_id) const;
     std::optional<uint32_t> weakest_adjacent_enemy(
         const CastleCommand& cmd, const CastleData& source,
         uint32_t faction_id) const;
+
+    // Symmetric diplomacy matrix, indexed by faction id (1..kMaxFactionId).
+    static constexpr uint32_t kMaxFactionId = 8;
+    DiplomacyRelation relations_[kMaxFactionId + 1][kMaxFactionId + 1];
 
     std::vector<Faction> factions_;
     std::vector<StrategyEvent> events_;

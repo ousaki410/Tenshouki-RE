@@ -172,6 +172,35 @@ The current implementation picks the first available officer deterministically.
 A future refinement can match officer attributes (loyalty, command, warfare)
 and regional origin to castle needs.
 
+### 5.2 Diplomacy
+
+A symmetric diplomacy matrix tracks relations between all factions:
+`Neutral` (default), `Alliance`, or `War`. The API is exposed through
+`StrategyManager`:
+
+- `get_relation(a, b)`, `is_at_war(a, b)`, `is_allied(a, b)`
+- `declare_war(a, b, date)`, `form_alliance(a, b, date)`, `break_alliance(a, b, date)`
+
+Relations are symmetric and logged as `DiplomacyDeclaredWar`,
+`DiplomacyAlliance`, or `DiplomacyBrokeAlliance` events. During AI attack
+selection (`weakest_adjacent_enemy`), castles owned by allied factions are
+excluded from valid targets. A faction at war is not yet prioritised; that
+remains a future refinement.
+
+### 5.3 Abstract combat
+
+At the start of each AI faction's monthly turn (before economy, recruitment,
+construction, and attack), `StrategyManager::process_ai_officer_assignment()`
+appoints a lord to every faction-owned castle that still lacks one
+(`lord_officer_id == 0`). Officers are drawn from the pool of officers not yet
+assigned as lord anywhere (`CastleCommand::get_available_officers()`), so no
+officer serves two castles at once. A newly appointed lord immediately grants
+the `+2` lord-presence loyalty bonus during that month's economy resolution.
+
+The current implementation picks the first available officer deterministically.
+A future refinement can match officer attributes (loyalty, command, warfare)
+and regional origin to castle needs.
+
 ### 5.2 Abstract combat
 
 ```
@@ -259,4 +288,4 @@ cd build && ctest
 - Tactical battles are only played when the player initiates them; all other
   combat is statistical.
 - AI does not coordinate between factions, form alliances, or retreat.
-- There is no diplomacy, tactical AI, or campaign balancing yet.
+- There is no tactical AI or campaign balancing yet.

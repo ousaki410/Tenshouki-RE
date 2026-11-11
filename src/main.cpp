@@ -2145,6 +2145,102 @@ private:
             }
         }
 
+        // ---- Diplomacy ----
+        LOG_INFO("--- Diplomacy ---");
+        {
+            // Simple setup: 8 castles, one per region/faction (no lords).
+            SndataArchive dip_sndata;
+            dip_sndata.scenario = 1;
+            for (uint32_t i = 0; i < 8; ++i) {
+                Castle castle;
+                castle.index = i;
+                castle.name_utf8 = "Castle " + std::to_string(i);
+                castle.name_raw = castle.name_utf8;
+                dip_sndata.castles.push_back(std::move(castle));
+            }
+            for (uint32_t i = 1; i <= 8; ++i) {
+                Officer off;
+                off.slot = i;
+                off.id = i;
+                off.status = 0;
+                off.gender = 0;
+                off.name_utf8 = "Officer " + std::to_string(i);
+                off.name_raw = off.name_utf8;
+                dip_sndata.officers.push_back(std::move(off));
+            }
+
+            CastleCommand dip_cmd;
+            dip_cmd.init(dip_sndata);
+            dip_cmd.set_turn_count(0);
+
+            StrategyManager dip_strategy;
+            dip_strategy.set_seed(777);
+            dip_strategy.init(dip_cmd);
+
+            GameDate dip_date(1, 4, 1);
+
+            // Initially all neutral.
+            check(dip_strategy.get_relation(1, 2) == DiplomacyRelation::Neutral,
+                  "all pairs start neutral");
+            check(!dip_strategy.is_at_war(1, 2), "not at war initially");
+            check(!dip_strategy.is_allied(1, 2), "not allied initially");
+
+            // Declare war: 1 vs 2.
+            dip_strategy.declare_war(1, 2, dip_date);
+            check(dip_strategy.get_relation(1, 2) == DiplomacyRelation::War,
+                  "war declared");
+            check(dip_strategy.is_at_war(1, 2), "is_at_war returns true");
+            check(dip_strategy.get_relation(2, 1) == DiplomacyRelation::War,
+                  "war is symmetric");
+
+            // Form alliance: 1 vs 3.
+            dip_strategy.form_alliance(1, 3, dip_date);
+            check(dip_strategy.get_relation(1, 3) == DiplomacyRelation::Alliance,
+                  "alliance formed");
+            check(dip_strategy.is_allied(1, 3), "is_allied returns true");
+            check(dip_strategy.get_relation(3, 1) == DiplomacyRelation::Alliance,
+                  "alliance is symmetric");
+
+            // Break alliance returns to neutral.
+            dip_strategy.break_alliance(1, 3, dip_date);
+            check(dip_strategy.get_relation(1, 3) == DiplomacyRelation::Neutral,
+                  "break_alliance returns to neutral");
+            check(!dip_strategy.is_allied(1, 3), "no longer allied");
+
+            // Repeated calls to same relation don't spam events.
+            size_t events_before = dip_strategy.events().size();
+            dip_strategy.declare_war(1, 2, dip_date);
+            size_t events_after = dip_strategy.events().size();
+            check(events_after == events_before,
+                  "re-declaring war on same target does not duplicate event");
+
+            // Allies are not valid attack targets.
+            // Setup: 1 (player) vs 2 (AI), and 1 vs 3 (AI allied with 1).
+            // Castle 0 (region 0, owner 2) adjacent to castle 4 (region 4, owner 1).
+            // Castle 1 (region 1, owner 3) adjacent to castle 4.
+            // We'll manually adjust adjacency logic: region 0 adjacent to 4? No.
+            // Instead, use regions 4 (owner 1) and 3 (owner 5) which ARE adjacent.
+            // Faction 5 is Takeda (region 3), adjacent to Kansai (region 4).
+            // Castles: index 3 -> region 3 -> owner 5; index 4 -> region 4 -> owner 1.
+            // Make 1 and 5 allied.
+            dip_strategy.form_alliance(1, 5, dip_date);
+            // Now process AI turn for faction 5; it should NOT attack faction 1's castle.
+            std::vector<StrategyEvent> dip_events;
+            dip_strategy.process_ai_turn(dip_cmd, dip_date, dip_events);
+            // Check that no attack happened against faction 1's castle.
+            bool attacked_allied = false;
+            for (const auto& e : dip_events) {
+                if (e.type == StrategyEventType::AiAttack) {
+                    if (e.message.find("Takeda") != std::string::npos &&
+                        e.message.find("Oda") != std::string::npos) {
+                        attacked_allied = true;
+                    }
+                }
+            }
+            check(!attacked_allied,
+                  "AI does not attack allied faction's castles");
+        }
+
         // ---- Summary ----
         LOG_INFO("=== Strategy Test Summary ===");
         LOG_INFO("  Failures: {}", failures);
