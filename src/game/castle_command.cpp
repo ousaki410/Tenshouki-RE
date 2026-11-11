@@ -40,6 +40,11 @@ void CastleCommand::init(const SndataArchive& sndata) {
         // Default campaign setup: eight regions, one faction per region.
         // The player starts in Kansai (region 4); every region's first castle
         // is its capital.
+        //
+        // NOTE: the sndata castle record is only 33 bytes and carries no
+        // explicit region field (verified across sndata1..6.dat), so this is
+        // a temporary placeholder. Replace with a per-castle region table
+        // recovered from scenario/map data when available.
         cd.region_id = castle.index % 8;
         cd.owner_id = default_owner_for_region(cd.region_id);
         cd.is_player_owned = (cd.owner_id == 1);

@@ -39,7 +39,9 @@ A native Linux port of *Nobunaga's Ambition: Tenshouki* (信長の野望・天�
 - See [docs/STRATEGY_LAYER.md](docs/STRATEGY_LAYER.md)
 
 **Next** 🔲
-- Verify the per-castle region table against scenario data
+- Region table: sndata castle record (33 bytes) carries no region field
+  (verified across sndata1..6.dat); keep `castle.index % 8` placeholder until
+  map/scenario data provides a verified per-castle region table
 - Diplomacy, officer-assignment AI, tactical AI, and campaign balancing
 
 ## Game files

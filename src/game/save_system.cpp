@@ -14,6 +14,18 @@
 
 namespace tensyoki {
 
+namespace {
+
+// Older saves (produced before the decode_cp932 NUL-compaction fix) may
+// contain embedded NUL bytes inside name_utf8 / lord_name_utf8. Strip them
+// on load so UI rendering never truncates a name at an embedded NUL.
+std::string strip_embedded_nulls(std::string s) {
+    s.erase(std::remove(s.begin(), s.end(), '\0'), s.end());
+    return s;
+}
+
+}  // namespace
+
 void SaveSystem::init(const std::string& save_dir) {
     save_dir_ = save_dir;
     ensure_dir();
@@ -242,7 +254,8 @@ bool SaveSystem::deserialize(const std::string& json, GameSaveData& data) const 
                 }
             } else if (line.find("castle.name_utf8=") == 0) {
                 if (!data.castles.empty()) {
-                    data.castles.back().name_utf8 = line.substr(17);
+                    data.castles.back().name_utf8 =
+                        strip_embedded_nulls(line.substr(17));
                 }
             } else if (line.find("castle.level=") == 0) {
                 if (!data.castles.empty()) {
@@ -300,7 +313,8 @@ bool SaveSystem::deserialize(const std::string& json, GameSaveData& data) const 
                 }
             } else if (line.find("castle.lord_name_utf8=") == 0) {
                 if (!data.castles.empty()) {
-                    data.castles.back().lord_name_utf8 = line.substr(22);
+                    data.castles.back().lord_name_utf8 =
+                        strip_embedded_nulls(line.substr(22));
                 }
             } else if (line.find("castle.region_id=") == 0) {
                 if (!data.castles.empty()) {

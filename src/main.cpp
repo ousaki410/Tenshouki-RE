@@ -1469,6 +1469,106 @@ private:
         check(loaded2.date_year == 9, "overwritten date year is 9");
         check(loaded2.save_name == "Overwritten Save", "overwritten save name matches");
 
+        // ---- Version 1 migration: legacy file without owner_id/turn_count ----
+        LOG_INFO("--- Version 1 Migration ---");
+        const std::string legacy_save =
+            "version=1\n"
+            "date_year=4\n"
+            "date_month=10\n"
+            "date_day=15\n"
+            "save_name=V1 Legacy Save\n"
+            "player_castle_count=2\n"
+            "total_castles=2\n"
+            "castle_count=2\n"
+            "castle.index=1\n"
+            "castle.name=Castle A\n"
+            "castle.name_utf8=Castle A\n"
+            "castle.level=3\n"
+            "castle.defense=10\n"
+            "castle.max_defense=50\n"
+            "castle.garrison=50\n"
+            "castle.max_garrison=100\n"
+            "castle.gold=2000\n"
+            "castle.food=1000\n"
+            "castle.has_wall=0\n"
+            "castle.has_barracks=0\n"
+            "castle.has_storehouse=0\n"
+            "castle.has_market=0\n"
+            "castle.lord_officer_id=0\n"
+            "castle.lord_name=\n"
+            "castle.lord_name_utf8=\n"
+            "castle.region_id=1\n"
+            "castle.is_player_owned=1\n"
+            "castle.is_capital=0\n"
+            "castle.auto_defense_bonus=0\n"
+            "castle.loyalty=75\n"
+            "castle.tax_rate=40\n"
+            "castle.unrest=10\n"
+            "castle.end\n"
+            "castle.index=2\n"
+            "castle.name=Castle B\n"
+            "castle.name_utf8=Castle B\n"
+            "castle.level=2\n"
+            "castle.defense=10\n"
+            "castle.max_defense=50\n"
+            "castle.garrison=30\n"
+            "castle.max_garrison=100\n"
+            "castle.gold=1500\n"
+            "castle.food=800\n"
+            "castle.has_wall=0\n"
+            "castle.has_barracks=0\n"
+            "castle.has_storehouse=0\n"
+            "castle.has_market=0\n"
+            "castle.lord_officer_id=0\n"
+            "castle.lord_name=\n"
+            "castle.lord_name_utf8=\n"
+            "castle.region_id=1\n"
+            "castle.is_player_owned=0\n"
+            "castle.is_capital=0\n"
+            "castle.auto_defense_bonus=0\n"
+            "castle.loyalty=60\n"
+            "castle.tax_rate=50\n"
+            "castle.unrest=20\n"
+            "castle.end\n"
+            "end\n";
+        {
+            std::ofstream legacy_file(save_sys.get_save_path(9));
+            check(legacy_file.is_open(), "legacy v1 save file can be written");
+            legacy_file << legacy_save;
+        }
+        GameSaveData legacy;
+        bool legacy_ok = save_sys.load(9, legacy);
+        check(legacy_ok, "legacy v1 save loads without owner_id/turn_count");
+        check(legacy.version == 1, "legacy save reports version 1");
+        check(legacy.turn_count == 0, "missing turn_count defaults to 0");
+        check(legacy.castles.size() == 2, "legacy save loads 2 castles");
+        check(legacy.castles[0].owner_id == 0,
+              "legacy castle 1 has no owner_id before migration");
+        check(legacy.castles[1].owner_id == 0,
+              "legacy castle 2 has no owner_id before migration");
+
+        // Apply the same legacy migration the main menu performs on load.
+        CastleCommand legacy_cmd;
+        legacy_cmd.set_castles_data(legacy.castles);
+        StrategyManager legacy_strategy;
+        legacy_strategy.rebuild(legacy_cmd, true);
+        auto* legacy_c1 = legacy_cmd.get_castle(1);
+        auto* legacy_c2 = legacy_cmd.get_castle(2);
+        check(legacy_c1 != nullptr && legacy_c1->owner_id == 1,
+              "migrated player castle owned by player faction (1)");
+        check(legacy_c1->is_player_owned,
+              "migrated player castle stays player-owned");
+        check(legacy_c2 != nullptr && legacy_c2->owner_id == 3,
+              "migrated AI castle owned by default region faction (Mogami, 3)");
+        check(!legacy_c2->is_player_owned,
+              "migrated AI castle is not player-owned");
+        check(legacy_strategy.faction(1)->alive,
+              "player faction alive after legacy migration");
+        check(legacy_strategy.faction(3)->alive,
+              "Mogami faction alive after legacy migration");
+
+        save_sys.delete_save(9);
+
         // ---- Cleanup test saves ----
         save_sys.delete_save(2);
         std::error_code ec;

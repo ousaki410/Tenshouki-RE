@@ -237,8 +237,11 @@ cd build && ctest
 
 ## 10. Known Simplifications
 
-- Region assignment (`castle.index % 8`) is a placeholder until a verified
-  map-region table is recovered from the scenario data.
+- Region assignment (`castle.index % 8`) is a placeholder. The sndata castle
+  record is only 33 bytes and carries no explicit region field (verified
+  across sndata1..6.dat), so no verified per-castle region table could be
+  recovered from the scenario data yet; replace it when map/scenario data
+  provides one.
 - Tactical battles are only played when the player initiates them; all other
   combat is statistical.
 - AI does not coordinate between factions, form alliances, or retreat.

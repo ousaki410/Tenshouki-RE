@@ -45,7 +45,7 @@ bool MapView::init(const SndataArchive& sndata, GT1GTextureCache& tex_cache,
         cp.index = castle.index;
         cp.name = castle.name_raw;
         cp.name_utf8 = castle.name_utf8.empty() ? castle.name_raw : castle.name_utf8;
-        cp.region_id = castle.index % 8;  // Fallback region assignment
+        cp.region_id = castle.index % 8;  // Fallback: see castle_command.cpp init() NOTE
         if (castle_command_) {
             if (const CastleData* cd = castle_command_->get_castle(castle.index)) {
                 cp.region_id = cd->region_id % 8;
