@@ -184,6 +184,9 @@ public:
     /// to neighbouring regions in the north-to-south region chain.
     static bool are_adjacent(const CastleData& a, const CastleData& b);
 
+    // Diplomacy matrix size (8 factions), exposed for UI iteration.
+    static constexpr uint32_t kMaxFactionId = 8;
+
 private:
     void rebuild_factions(const CastleCommand& cmd);
     void log_event(StrategyEventType type, const GameDate& date,
@@ -223,7 +226,6 @@ private:
         uint32_t faction_id) const;
 
     // Symmetric diplomacy matrix, indexed by faction id (1..kMaxFactionId).
-    static constexpr uint32_t kMaxFactionId = 8;
     DiplomacyRelation relations_[kMaxFactionId + 1][kMaxFactionId + 1];
 
     std::vector<Faction> factions_;

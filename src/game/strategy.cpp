@@ -196,6 +196,7 @@ void StrategyManager::log_event(StrategyEventType type, const GameDate& date,
     event.turn = turn_;
     event.year = date.year;
     event.month = date.month;
+    LOG_INFO("[strategy-event] {} (turn {})", message, event.turn);
     event.message = std::move(message);
 
     if (out) {

@@ -429,6 +429,41 @@ void MapViewState::render() {
     }
     ImGui::End();
 
+    // Diplomacy panel: player faction (1 = Oda) relations with factions 2-8.
+    ImGui::SetNextWindowPos({10, 480}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({340, 230}, ImGuiCond_Always);
+    ImGui::Begin("Diplomacy", nullptr,
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+    ImGui::Text("Diplomacy (Player: %s)",
+                ctx_.strategy.faction_name(1).c_str());
+    ImGui::Separator();
+    for (uint32_t id = 2; id <= StrategyManager::kMaxFactionId; ++id) {
+        DiplomacyRelation rel = ctx_.strategy.get_relation(1, id);
+        const char* rel_str =
+            rel == DiplomacyRelation::Alliance   ? "Allied"
+            : rel == DiplomacyRelation::War      ? "At War"
+                                                 : "Neutral";
+        ImVec4 rel_col =
+            rel == DiplomacyRelation::Alliance ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f)
+            : rel == DiplomacyRelation::War    ? ImVec4(1.0f, 0.3f, 0.3f, 1.0f)
+                                               : ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
+        ImGui::TextColored(rel_col, "%s: %s",
+                           ctx_.strategy.faction_name(id).c_str(), rel_str);
+        ImGui::SameLine();
+        if (ImGui::SmallButton(("War##" + std::to_string(id)).c_str())) {
+            ctx_.strategy.declare_war(1, id, ctx_.date);
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton(("Ally##" + std::to_string(id)).c_str())) {
+            ctx_.strategy.form_alliance(1, id, ctx_.date);
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton(("Break##" + std::to_string(id)).c_str())) {
+            ctx_.strategy.break_alliance(1, id, ctx_.date);
+        }
+    }
+    ImGui::End();
+
     // Save/Load panel
     ImGui::SetNextWindowPos({(float)ctx_.renderer->get_width() - 240, 200},
                             ImGuiCond_Always);
